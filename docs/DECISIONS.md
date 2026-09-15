@@ -124,3 +124,38 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   `PAYWAY_MERCHANT_ID` / `GOOGLE_APPLICATION_CREDENTIALS` 是标识符、URL
   与文件路径，不是凭证，保持 `str`。
 
+## D-005 初始 migration 创建 pgcrypto，但 downgrade 不删除它
+
+- 日期：2026-09-15
+- 背景：`DATA_MODEL.sql` 以 `CREATE EXTENSION IF NOT EXISTS "pgcrypto"` 开头，
+  21 张表里所有 UUID 主键都用 `gen_random_uuid()` 作默认值，没有这个扩展
+  一条都插不进去。autogenerate 不会生成扩展语句，必须手工补。
+  但 downgrade 是否应该对称地 `DROP EXTENSION`，PRD 与 CODING_STANDARDS 都没写。
+- 选择：upgrade 创建，**downgrade 不删除**，并在 migration 里注明原因。
+- 理由：`IF NOT EXISTS` 的语义决定了我们无法区分「扩展是本次 migration 建的」
+  还是「它本来就在」。删掉一个别人依赖的扩展，比留下一个没人用的扩展后果严重
+  得多。这符合 CLAUDE.md 第 6 节「选最保守、最容易回退的方案」。
+- 代价：downgrade 后数据库会残留一个未使用的扩展。无功能影响，
+  下次 upgrade 时 `IF NOT EXISTS` 直接跳过。
+- 回退成本：低。需要对称时在 downgrade 末尾加一行
+  `DROP EXTENSION IF EXISTS pgcrypto`（不要加 CASCADE）。
+- 影响范围：`alembic/versions/79333c6c4815_*.py`。
+- 保障：`test_pgcrypto_is_created_by_the_migration` 确认 upgrade 后
+  `gen_random_uuid()` 可用；`test_downgrade_removes_everything_and_upgrade_restores_it`
+  确认 downgrade→upgrade 往返后 schema 指纹不变。
+
+## D-006 模型暂不声明任何 `relationship()`
+
+- 日期：2026-09-15
+- 背景：ARCHITECTURE 与 DATA_MODEL 只规定表结构，未规定 ORM 关系。
+  惯常做法是建表时顺手把 `relationship()` 都配上。
+- 选择：**一个都不配**。等到某个查询真正需要时，在那里加，并显式指定
+  加载策略（`selectinload` / `joinedload`）。
+- 理由：关系不影响 schema（验收标准与它无关），但在 async session 下
+  懒加载会抛 `MissingGreenlet`——这是 SQLAlchemy 异步用法最常见的事故。
+  提前配一堆没人用的关系，等于提前埋下一批只在运行时才炸的地雷，
+  而且每一条都需要单独想清楚加载策略才算配对。没有需求就没有正确答案。
+- 备选与放弃原因：全量配上 `lazy="raise"` —— 能挡住意外懒加载，
+  但仍是在为假想需求写代码，且 21 张表的关系图要维护。
+- 回退成本：低。加关系是纯增量操作，不涉及 migration。
+- 影响范围：`app/models/*`，以及 D 阶段写查询时的取数方式。
