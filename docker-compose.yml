@@ -1,0 +1,58 @@
+# KruAI local development infrastructure.
+#
+# Scope: PostgreSQL 16 + Redis 7 only. The backend itself runs on the host via
+# `make run` during M1/M2 — containerising the app belongs to the deployment
+# task, not here.
+#
+# Credentials below are provisioning inputs for the containers, deliberately
+# NOT part of `core/config.py` Settings (which uses extra="forbid"). See
+# docs/DECISIONS.md D-001. They are localhost-bound dev values; production uses
+# a managed database reached through DATABASE_URL.
+#
+# If you override POSTGRES_* here, update DATABASE_URL in .env to match.
+
+name: kruai
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kruai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kruai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kruai_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-kruai}
+      # DATA_MODEL.sql stores every timestamp as UTC TIMESTAMPTZ.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kruai} -d ${POSTGRES_DB:-kruai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: kruai-redis
+    restart: unless-stopped
+    # appendonly keeps RQ jobs across a dev restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  postgres_data:
+  redis_data:
