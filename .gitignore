@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Build / dist
+dist/
+build/
+*.whl
+
+# Node (miniapp, M3+)
+node_modules/
+
+# Content pipeline outputs (large, regenerable)
+pipeline/packs/*.json
+pipeline/packs/*.tar.gz

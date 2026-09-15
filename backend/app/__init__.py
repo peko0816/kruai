@@ -1,0 +1,1 @@
+"""KruAI backend package."""
