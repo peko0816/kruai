@@ -1,0 +1,70 @@
+name: CI
+
+# Every provider stays `fake` here — that is the whole point. Gate G-B requires
+# the system to run end to end with no vendor credentials, so CI proves it on
+# every pull request rather than at milestone time.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: make check
+    runs-on: ubuntu-latest
+
+    services:
+      # Credentials must match DATABASE_URL in .env.example, which is copied to
+      # .env below. Keeping CI on the same template developers use means a
+      # broken template fails here instead of on someone's laptop.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kruai
+          POSTGRES_PASSWORD: kruai_dev
+          POSTGRES_DB: kruai
+          TZ: UTC
+          PGTZ: UTC
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kruai -d kruai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Provide configuration
+        # Settings declares the 11 secrets as required with no defaults
+        # (docs/DECISIONS.md D-004), so the file has to exist and carry every
+        # key. Blank values are correct: nothing here talks to a real vendor.
+        run: cp .env.example .env
+
+      - name: Verify the lockfile is current
+        # A lockfile that drifted from pyproject.toml makes this build
+        # unreproducible and would resolve different versions than developers ran.
+        run: uv lock --directory backend --check
+
+      - name: Install dependencies
+        run: make sync
+
+      - name: Run checks
+        # ruff + ruff format + mypy strict + pytest, the same command that gates
+        # a local commit. The integration tests refuse to skip when CI is set,
+        # so a misconfigured postgres service fails the job instead of quietly
+        # dropping the schema guards.
+        run: make check

@@ -50,13 +50,24 @@ def _base_url() -> URL:
 
 @pytest.fixture(scope="session")
 def admin_engine() -> Iterator[sa.Engine]:
-    """Connection to the maintenance database, for CREATE/DROP DATABASE."""
+    """Connection to the maintenance database, for CREATE/DROP DATABASE.
+
+    Skipping locally is a convenience for anyone without Docker running. In CI
+    it is a trap: these are the only guards that the schema still matches
+    DATA_MODEL.sql, and a green build that silently skipped them is worse than
+    a red one. So under CI an unreachable database fails instead.
+    """
     url = _base_url().set(database="postgres")
     engine = sa.create_engine(url, isolation_level="AUTOCOMMIT")
     try:
         with engine.connect():
             pass
     except sa.exc.OperationalError as exc:
+        if os.environ.get("CI"):
+            raise RuntimeError(
+                "PostgreSQL unreachable in CI; the schema guards would have been "
+                "skipped. Check the postgres service definition in the workflow."
+            ) from exc
         pytest.skip(
             f"PostgreSQL unreachable ({exc.__class__.__name__}); run `docker compose up -d`"
         )
