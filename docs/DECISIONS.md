@@ -70,3 +70,57 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   或填线上 endpoint 即可，不涉及代码结构变更。
 - 影响范围：`.env.example`、A3 的 `core/config.py`、E6/E7。
 
+## D-003 `core/money.py` 不定义 `Money` 类，改用 `MoneyLike` Protocol
+
+- 日期：2026-09-15
+- 背景：BACKLOG D8a 写的是「`Money` 值对象与 `core/money.py`」，CODING_STANDARDS
+  第 3 节要求「格式化只在展示层，统一走 `core/money.py`」。但
+  `interfaces/payments_base.py` 是**规范性文件**，它自己定义了 `Money`
+  数据类，且 CLAUDE.md 第 4 节要求 B4 把它**原样复制**到
+  `services/payments/base.py`、签名不得改动。若 `core/money.py` 也定义一个
+  `Money`，代码库会出现两个结构相同但互不兼容的类型——跨层 `isinstance`
+  判断会失败，且没人说得清该 import 哪一个。
+- 选择：`core/money.py` **不定义 `Money`**。它只持有币种元数据
+  （`MINOR_UNITS` / `CURRENCY_SYMBOLS`）、校验与格式化函数，全部面向一个
+  `MoneyLike` Protocol 编程。`payments.base.Money` 结构上天然满足该 Protocol，
+  无需任何 import。`Money` 这个类由 B4 从规范文件带入，唯一。
+- 备选与放弃原因：
+  1. `core/money.py` 定义 `Money`，B4 的 base.py 改为 import 它 ——
+     违反「原样复制，签名不得改动」。
+  2. 两处各定义一个，接受重复 —— 两个 frozen dataclass 结构相同但类型不同，
+     是真实的 bug 温床。
+  3. `core/money.py` 直接 import `services/payments/base.py` ——
+     基础设施层反向依赖适配层，违反 ARCHITECTURE 第 1 节的分层规则。
+- 回退成本：低。若将来确定要一个集中的 `Money`，把 Protocol 换成具体类、
+  改 import 即可，所有函数签名不变。
+- 影响范围：`core/money.py`、B4 的 `services/payments/base.py`、D8a。
+- 保障：`tests/unit/test_money.py::test_normative_money_satisfies_moneylike`
+  直接加载 `interfaces/payments_base.py` 并用真实的 `Money` 跑格式化，
+  这个前提一旦不成立，在 A3 就红，不会拖到 B4 才发现。
+
+## D-004 密钥声明为必填（无默认值），并在 `ENV=prod` 时校验签名密钥非空
+
+- 日期：2026-09-15
+- 背景：CONFIG_REFERENCE 第 9 节写明密钥「**永远不要有默认值**」，但没说
+  缺失时应当如何表现。若声明成 `str = ""`，删掉 `.env` 里的一行不会有任何
+  症状，系统会带着空密钥静默运行——空的 `JWT_SECRET` 意味着任何人都能伪造
+  token。
+- 选择：两层。
+  1. 11 个密钥全部声明为**必填**（无默认值）。`.env` 里缺这一行 → 启动失败。
+     这是对「永远不要有默认值」最字面的实现。
+  2. 必填只能挡住「整行缺失」，挡不住 `JWT_SECRET=`（空值）。因此追加一条
+     `ENV=prod` 时的校验：`JWT_SECRET` 与 `TELEGRAM_BOT_TOKEN` 必须非空白。
+     dev/CI 全 fake 时允许为空，否则本地开发需要真凭证，与 G-B 验收冲突。
+- 为什么只校验这两个：其余密钥是否必需取决于启用了哪些 provider
+  （`AZURE_SPEECH_KEY` 只在 `SCORING_PROVIDER=azure` 时才需要）。
+  那是 B5「registry 启动期能力自检」的职责，在此重复判断会形成两处真相。
+- 备选与放弃原因：给密钥 `= ""` 默认值 —— 缺失与空值无法区分，
+  且与 CONFIG_REFERENCE 的字面要求冲突。
+- 回退成本：低。放宽只需给字段加默认值。
+- 影响范围：`core/config.py`、`.env.example`、A5 的 CI 配置
+  （CI 需要一份含全部 11 个键的 `.env`）。
+- 附带：7 个真凭证字段用 `SecretStr`，使 `model_dump()` 与 `repr()`
+  无法泄露它们；`AZURE_SPEECH_REGION` / `PAYWAY_BASE_URL` /
+  `PAYWAY_MERCHANT_ID` / `GOOGLE_APPLICATION_CREDENTIALS` 是标识符、URL
+  与文件路径，不是凭证，保持 `str`。
+
