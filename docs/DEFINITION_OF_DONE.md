@@ -1,0 +1,115 @@
+# 完成的定义（DoD）
+
+---
+
+## 1. 每个 PR 的检查单
+
+复制到 PR 描述里逐条勾选。**有任何一条打不了勾就不要提交。**
+
+```markdown
+### 基础
+- [ ] `make check` 全绿（ruff + ruff format + mypy strict + pytest）
+- [ ] 所有 provider 设为 fake 时系统仍能端到端跑通
+- [ ] 无新增 `# type: ignore`（如有，附原因注释）
+
+### 红线（对照 CLAUDE.md 第 2 节）
+- [ ] R1 运行时无 LLM 生成课程内容
+- [ ] R2 未直接引用任何厂商 SDK（只经 base.py 抽象）
+- [ ] R3 无新增硬编码阈值/权重/限额（已同步 CONFIG_REFERENCE.md）
+- [ ] R4 用户金额用 amount_minor + currency_minor_units；内部成本用 _usd_cents；时长 int seconds/ms；无 float 参与金额
+- [ ] R5 无硬编码密钥
+- [ ] R6 未触碰 PRD 第 14 节非目标 / CLAUDE.md 第 3 节「现在不要做」
+- [ ] R7 内容相关变更的 sources[]/licence 校验仍生效
+
+### 测试
+- [ ] 新增逻辑有单测
+- [ ] 涉及金额/计量/评分的有边界用例（0、负数、超限、并发）
+- [ ] 测试断言的是行为不是实现细节
+
+### 数据与配置
+- [ ] DB 变更有 alembic migration
+- [ ] `downgrade` 实际跑通过一次
+- [ ] 新增配置项已同步 CONFIG_REFERENCE.md + .env.example + Settings
+
+### 可观测
+- [ ] 外部调用记录了 provider / latency_ms / cost_usd_cents
+- [ ] 日志无敏感信息（音频、手机号、密钥、支付原始敏感字段）
+
+### 文档
+- [ ] PRD 未定义而自行决策的，已在 docs/DECISIONS.md 追加记录
+```
+
+---
+
+## 2. 里程碑验收
+
+### M0 技术验证（外部，不阻塞开发）
+
+三份报告齐备，落 `docs/`：
+
+| 项 | 通过标准 |
+|---|---|
+| M0-1 中文发音评测 | good 组与 bad 组平均分差 ≥ 15 分，重叠样本 ≤ 20%；音素级 JSON 非空；给出 `ZH_TONE_MODE` 的结论 |
+| M0-2 高棉语 TTS | ≥ 2 位母语者独立盲评，自然度与可懂度均值 ≥ 4，无致命发音错误；产出 `docs/tts-decision.md` |
+| M0-3 ABA PayWay | 凭证有效 + 收银台可创建 + 回调验签通过（SIGNATURE OK）；确认已开通的支付方式 |
+
+M0 通过后立即执行：替换三个 Fake Provider，按 M0-1 结论校准 `SCORING_PASS_THRESHOLD` 与 `ZH_TONE_MODE`。
+
+### M1 内容管线
+
+- [ ] HSK1 全部 concept 完成生成
+- [ ] 通过 `validate.py` 全部 8 条规则（含 `hskk_task_types` 非空、`sources`/`licence` 非空）
+- [ ] 母语者 10% 抽检合格率 ≥ 90%
+- [ ] 全部固定文本音频已预生成并上传对象存储
+- [ ] `import_pack.py` 可将 pack 完整导入空库并通过一致性校验
+
+### M2 Basic 闭环上线
+
+- [ ] 真实用户可在 Telegram Bot 完成 HSK1 一个完整单元（讲解 → drill → vocab → Q&A → 完课）
+- [ ] mastery 与复习队列正确更新，重启服务后状态不丢
+- [ ] Free/Basic 付费墙生效，额度扣减在并发下正确（有并发测试）
+- [ ] ABA 收款可完成一笔真实小额支付，回调验签通过并自动开通订阅
+- [ ] **续费双路径都跑通**：`supports_recurring=True` 的 provider 走 auto 扣款；`False` 的走 manual 提醒；grace 期到期正确降级
+- [ ] **多币种金额正确**：USD（2 位小数）与 KHR（0 位小数）各有单测，无任何 float 参与金额计算
+- [ ] `media_assets` 双形态可切换，音频回退路径已测（模拟视频加载失败）
+- [ ] `/api/v1/admin/costs` 可用，`cost_ledger` 覆盖全部外部调用
+- [ ] 单用户月成本估算未超 `COST_CAP_BASIC_USD_CENTS_MONTHLY`
+
+### M3 Pro 实时语音
+
+- [ ] Mini App 可发起实时会话，音频双向通
+- [ ] 分钟（秒）扣减准确，服务端权威，前端无法绕过
+- [ ] 单次会话 15 分钟硬上限生效（服务端主动断开）
+- [ ] 系统提示逐字稳定，`cached_input_tokens` 有实际命中
+- [ ] 超量包可购买并即时生效
+- [ ] S2 锚点视频上线，弱网可回退音频
+
+### M4 B 端最小可售
+
+- [ ] 可为一家企业创建 org 并批量发放 20 个席位
+- [ ] 岗位课包（酒店前台中文）可用，走同一条内容管线产出
+- [ ] 月报定时任务可生成 PDF 并推送邮件
+- [ ] 企业成员数据与 C 端隔离正确（org 内可见，跨 org 不可见）
+
+### S3 门槛评估（M4 之后）
+
+不是交付项，是**判定项**。三条全满足才进入 S3（PRD 7.2）：
+
+- [ ] 内容包连续 30 天无实质修改
+- [ ] 付费用户 ≥ 1000
+- [ ] A/B 实验显示视频版完课率提升 ≥ 15%
+
+不满足 → 不进入 S3，继续用音频。**这条不由主观判断，由 `experiments` 表的数据判定。**
+
+---
+
+## 3. 什么情况下必须停下来问人
+
+（重复 CLAUDE.md 第 6 节，因为最容易被忽略）
+
+1. **花钱的**：调用付费 API 的默认开关、并发上限、批量任务规模
+2. **动钱的**：定价、计量口径、退款与补偿逻辑
+3. **对外可见的**：用户文案语气、数字人形象表述、任何品牌相关决定
+4. **不可逆的**：数据删除、生产环境迁移、破坏性 schema 变更
+
+其余情况：选最保守方案，实现，记录到 `docs/DECISIONS.md`，继续推进。
