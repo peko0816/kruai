@@ -68,3 +68,10 @@ jobs:
         # so a misconfigured postgres service fails the job instead of quietly
         # dropping the schema guards.
         run: make check
+
+      - name: Self-check the shipped configuration
+        # A different assertion from the test suite: this reads the real .env
+        # rather than one a test constructed, so it proves the template we tell
+        # people to copy is a configuration the application can actually boot
+        # with. That is gate G-B stated as a command.
+        run: make selfcheck
