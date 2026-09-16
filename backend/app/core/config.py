@@ -114,6 +114,11 @@ class Settings(BaseSettings):
     quota_reset_hour_local: int = Field(default=0, ge=0, le=23)
 
     # --------------------------------------------------------------- 5. 成本护栏 [$]
+    #: The only float that touches money, and it is a ratio rather than an
+    #: amount, so R4 holds. But the comparison it drives is not exact:
+    #: 45 * 1.5 is 67.5, and whoever implements the guardrail has to decide
+    #: which side of 67 counts as over. Round explicitly at that call site
+    #: rather than letting float ordering decide it.
     cost_alert_multiplier: float = Field(default=1.5, gt=0.0)
     cost_cap_free_usd_cents_monthly: int = Field(default=15, ge=0)
     cost_cap_basic_usd_cents_monthly: int = Field(default=45, ge=0)

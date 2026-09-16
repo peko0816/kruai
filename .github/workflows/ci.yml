@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # No redis service yet: nothing under test connects to it. The first test
+      # that does needs one added here, or it will skip or fail depending on how
+      # it handles an unreachable cache — and a silently skipped test is the
+      # failure mode this workflow already goes out of its way to prevent.
+      #
       # Credentials must match DATABASE_URL in .env.example, which is copied to
       # .env below. Keeping CI on the same template developers use means a
       # broken template fails here instead of on someone's laptop.
