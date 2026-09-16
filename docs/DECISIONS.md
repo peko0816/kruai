@@ -383,6 +383,61 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 回退成本：低。改回 `str` 即可。
 - 影响范围：`app/services/cost_ledger.py`、D5。
 
+## D-015 SM-2 中间地带（`MASTERY_LOW` ≤ mastery < `MASTERY_HIGH`）保持原状
+
+- 日期：2026-09-16
+- 背景：PRD 9.2 的间隔重复只写了两条规则：
+  `mastery >= 80 → interval *= ease_factor`、
+  `mastery < 60 → interval = 1 day, ease_factor -= 0.2`。
+  **60 到 80 之间两条都不触发**，PRD 没说该怎么办。
+- 选择：`interval` 与 `ease_factor` **都不变**，`next_due_at = now + 当前 interval`，
+  即 concept 按原有节奏再来一次。返回的 `band` 标记为 `"held"`。
+- 理由：这是对规格最字面的读法——没有规则触发，就什么都不改。
+  学习者既没有表现出掌握、也没有表现出遗忘，维持当前间距是唯一不引入
+  新判断的做法。
+- 备选与放弃原因：
+  1. 中间地带也重置 `interval` —— 等于把「没掌握好」当成「失败」，
+     会让 60–79 分的学习者永远停在每日复习，与 `MASTERY_LOW` 这条线的存在
+     自相矛盾（既然划了线，线上和线下就该不同）。
+  2. 按 mastery 在区间内的位置做插值 —— PRD 没有任何依据支持某个插值公式，
+     而一个编出来的公式会在 M0 校准时无从判断对错。
+  3. 中间地带不重新调度（不更新 `next_due_at`）—— 那样 concept 会永远停留在
+     已过期状态，每次复习队列都把它排在最前，实际效果是每日复习。
+- 回退成本：低。三个分支集中在 `schedule_review` 一个 if/elif/else 里。
+- 影响范围：`app/services/mastery/sm2.py`、C3 的复习队列排序。
+- 保障：`test_the_middle_band_holds_everything_where_it_is` 与边界参数化测试
+  覆盖 79.9 / 60.0 两侧。变异验证：把中间地带改成重置会转红。
+
+## D-016 `interval` 增长用向上取整（`ceil`），而非 `floor` 或 `round`
+
+- 日期：2026-09-16
+- 背景：`interval *= ease_factor` 产出小数，而 `concept_mastery.interval_days`
+  是 `INTEGER`。PRD 未指定取整方式。
+- 选择：`math.ceil`。
+- 理由：这不是风格问题，另外两种取整都有一个**静默失效**的陷阱。
+  `SM2_EASE_MIN` 是 1.3，而 `floor(1 × 1.3)` 与 `round(1 × 1.3)` **都等于 1**：
+
+  ```
+  floor  [1, 1, 1, 1, 1, 1]   ← ease 触底后永远卡在每日复习
+  round  [1, 1, 1, 1, 1, 1]   ← 同上
+  ceil   [1, 2, 3, 4, 6, 8]
+  ```
+
+  也就是说：一个 ease 已衰减到下限的学习者，**即使每次都通过，也要天天
+  复习同一个 concept，永远不会拉开**。没有任何报错，调度就是不工作了。
+  向上取整是三者中唯一保证「通过就一定拉开」的。
+- 代价：间隔比向下取整长一些（ease=2.5 时 `1,3,8,20,50,125`
+  对比 `1,2,5,12,30,75`）。前几次差 1–3 天，之后相对于以周计的间隔可忽略。
+- 备选与放弃原因：
+  1. `floor` / `round` —— 见上，最需要帮助的学习者反而被卡死。
+  2. `max(floor(interval × ease), interval + 1)` —— 能保证增长，但表达的是
+     同一个意图而多一层包装，`ceil` 已经蕴含它。
+- 回退成本：低。`_grow()` 一个函数一行。
+- 影响范围：`app/services/mastery/sm2.py`。
+- 保障：`test_a_concept_at_minimum_ease_still_spaces_out` 与
+  `test_every_extension_moves_by_at_least_a_day` 直接断言这条性质。
+  变异验证：换成 `floor` 或 `round` 各有 4 个测试转红。
+
 ---
 
 # 遗留约束
@@ -401,5 +456,6 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 | L-3 | `REALTIME_PROVIDER` **未纳入启动自检**。目前没有 realtime registry，没有东西可以校验它，配错了今天既无症状也无后果。该适配器落地时要在 `selfcheck.py` 补一个 `_realtime_problems()`，否则一个错值会一路走到第一次 Pro 实时会话。 | BACKLOG F2（M3 实时语音代理） | `services/selfcheck.py` 的 `_llm_problems` 上方 |
 | L-4 | `docker-compose.yml` 把两个数据存储绑在 `0.0.0.0`，且 **Redis 完全没有密码**。仓库转 private 只解决 PostgreSQL 那一半（凭据不再公开），Redis 的暴露面与仓库可见性无关——同局域网内任何人都能直连。修法是绑回 loopback：`ports: ["127.0.0.1:6379:6379"]`。已与项目所有者确认**暂缓**。 | C 阶段 Redis 开始承载真实数据时 | 见 D-001；`docker-compose.yml` |
 | L-5 | `OBJECT_STORAGE_ENDPOINT` 与 `PUBLIC_MEDIA_BASE_URL` 仍为空，**`Settings` 中必须保持可选**。声明为必填会让全 fake 配置启动失败，直接违反 G-B 验收。 | BACKLOG E6 / E7（真实对象存储） | 见 D-002；`core/config.py` |
+| L-6 | `concept_mastery.ease_factor` 在 DDL 里默认 **2.5**，而 `SM2_EASE_INITIAL` 是配置项，当前也是 2.5。**两者会漂移**——改了配置，靠数据库默认值插入的新行仍然是 2.5。写入方必须显式带上 `initial_ease_factor(settings)`，不要依赖 DDL 默认值。 | D3 写入 `concept_mastery` 时 | `services/mastery/sm2.py` 的 `initial_ease_factor` |
 
 **处理完一条就把它从这张表里删掉**，并在对应的代码注释里说明已解决——留着一条已经不成立的约束，比没有这张表更糟。
