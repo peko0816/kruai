@@ -261,3 +261,38 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   验证产出确实满足 schema，而不是断言我们以为的形状——后者会和误解一起通过。
   已做变异验证：忽略 `minItems` 或 `minLength` 都会被校验器抓出
   "is too short"。
+
+## D-010 支付 Fake 的 HMAC key 公开写在源码里，并由 registry 禁止其在 `ENV=prod` 下构建
+
+- 日期：2026-09-16
+- 背景：ARCHITECTURE 3.2 规定 `FakePaymentProvider`「用**固定 HMAC key** 验签」。
+  但 R5 写的是「不得硬编码任何密钥」。这两条表面冲突，需要判断。
+- 判断：这不是密钥。签名方案在这里有意义的前提，就是**测试能用它签出有效签名**——
+  一个测试拿不到的 key，等于 `verify_callback` 的成功分支永远测不到。
+  它是公开的测试夹具，和 D-001 里 compose 的 `kruai_dev` 同类。
+  R5 真正要防的是**生产凭据进 git**，而这个 key 在生产中没有任何价值。
+- 但由此产生一个真实且严重的风险：**若有人用 `PAYMENT_PROVIDERS=fake`
+  部署到生产**，任何能读这个仓库的人都可以伪造一个签名有效的回调，
+  给自己开通订阅。这不是「fake 在生产里没用」，是「fake 在生产里可被利用」——
+  与另外三个 fake 的性质完全不同（评分/TTS/LLM 的 fake 在生产中只是产出垃圾，
+  不能被用来获利）。
+- 选择：
+  1. key 公开写在 `fake.py` 顶部，命名为 `FAKE_HMAC_KEY`，注释说明它是
+     夹具而非凭据，且真实 adapter 必须从 `Settings` 读自己的 key。
+  2. 同时导出 `sign_payload()`，让测试与 D8a 的 webhook 集成测试能构造
+     真实回调，而不是各自重新实现签名方案。
+  3. **`registry.build_payment_provider()` 在 `settings.env == "prod"` 时
+     拒绝构建 `fake` 与 `fake_manual`**，错误信息点明原因与修法。
+- 为什么守卫放在 B4 而不是留给 B5：B5 是通用的「启动期能力自检」，
+  检查的是 provider 能否覆盖所需能力。这一条不是能力问题，是**这一个适配器
+  特有的安全属性**，写在它自己的 registry 里，位置与风险一致。
+- 备选与放弃原因：
+  1. key 从 `Settings` 读 —— 要新增一个 `CONFIG_REFERENCE` 条目（R3），
+     且 `.env.example` 里必须填一个非空值否则 fake 不可用，反而更像是在
+     鼓励把它当真凭据管理。
+  2. 只写注释不加守卫 —— 注释挡不住误配置，而这个误配置的后果是免费订阅。
+- 回退成本：低。放宽只需删掉守卫的三行。
+- 影响范围：`app/services/payments/{fake,registry}.py`、D8a（webhook 测试
+  可直接用 `sign_payload`）、部署配置。
+- 保障：已做变异验证——去掉守卫会让 3 个测试转红；验签失败仍解出数据会让
+  「拒绝的回调不得携带可用数据」转红。
