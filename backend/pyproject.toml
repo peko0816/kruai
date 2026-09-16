@@ -41,7 +41,26 @@ packages = ["app"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["alembic/versions"]
+extend-exclude = [
+    "alembic/versions",
+    # The four provider base.py files are verbatim copies of interfaces/*.py,
+    # which CLAUDE.md section 4 declares normative: copied as-is, signatures
+    # unchanged. They are a specification artifact, not our code, so styling
+    # them to our rules is meaningless — and two of ruff's suggestions would
+    # actually break the contract. RUF002/RUF003 flag the full-width punctuation
+    # that Chinese prose requires, and UP042 wants `class Language(str, Enum)`
+    # rewritten as StrEnum, which changes what str() returns.
+    #
+    # Listed one by one rather than globbed: a future base.py under a domain
+    # service (mastery/, media/) is our code and must stay linted.
+    #
+    # tests/unit/test_provider_interfaces_are_verbatim.py asserts byte equality
+    # with interfaces/, so this exemption cannot hide drift.
+    "app/services/scoring/base.py",
+    "app/services/tts/base.py",
+    "app/services/payments/base.py",
+    "app/services/llm/base.py",
+]
 
 [tool.ruff.lint]
 select = [
