@@ -382,3 +382,24 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   不应该需要一次 migration。
 - 回退成本：低。改回 `str` 即可。
 - 影响范围：`app/services/cost_ledger.py`、D5。
+
+---
+
+# 遗留约束
+
+**这些不是决策，是已知的、尚未处理的约束。** 每一条都在未来某个具体任务上生效，
+现在没有症状，但到那时若没人记得，就会变成 bug。
+
+列在这里是为了让它们跟着仓库走——不依赖任何人的记忆，也不依赖某一次对话。
+每条在代码里对应位置另有一份注释，两处都放是因为：只看文档的人看不到代码注释，
+只改代码的人不会翻文档。
+
+| # | 约束 | 何时生效 | 代码内注释位置 |
+|---|---|---|---|
+| L-1 | `COST_ALERT_MULTIPLIER` 是唯一接触金额的浮点数。它是比率不是金额，不违反 R4，但它驱动的比较不精确：`45 × 1.5 = 67.5`，67 到底算不算超标需要显式决定。**在调用处显式取整，不要让浮点序关系替你决定。** | 实现 PRD 11.3 的成本护栏（「超过档位上限 1.5 倍时告警并自动限流」）时 | `core/config.py` 的 `cost_alert_multiplier` 字段 |
+| L-2 | CI 里**没有 Redis service**。目前没有任何测试连它，所以无所谓。第一个连 Redis 的测试出现时必须在 workflow 里补上，否则它会静默跳过或失败——而「静默跳过的测试」正是这个 workflow 已经专门防范的失败形态。 | 第一个依赖 Redis 的测试（RQ 任务、缓存） | `.github/workflows/ci.yml` 的 `services:` 段 |
+| L-3 | `REALTIME_PROVIDER` **未纳入启动自检**。目前没有 realtime registry，没有东西可以校验它，配错了今天既无症状也无后果。该适配器落地时要在 `selfcheck.py` 补一个 `_realtime_problems()`，否则一个错值会一路走到第一次 Pro 实时会话。 | BACKLOG F2（M3 实时语音代理） | `services/selfcheck.py` 的 `_llm_problems` 上方 |
+| L-4 | `docker-compose.yml` 把两个数据存储绑在 `0.0.0.0`，且 **Redis 完全没有密码**。仓库转 private 只解决 PostgreSQL 那一半（凭据不再公开），Redis 的暴露面与仓库可见性无关——同局域网内任何人都能直连。修法是绑回 loopback：`ports: ["127.0.0.1:6379:6379"]`。已与项目所有者确认**暂缓**。 | C 阶段 Redis 开始承载真实数据时 | 见 D-001；`docker-compose.yml` |
+| L-5 | `OBJECT_STORAGE_ENDPOINT` 与 `PUBLIC_MEDIA_BASE_URL` 仍为空，**`Settings` 中必须保持可选**。声明为必填会让全 fake 配置启动失败，直接违反 G-B 验收。 | BACKLOG E6 / E7（真实对象存储） | 见 D-002；`core/config.py` |
+
+**处理完一条就把它从这张表里删掉**，并在对应的代码注释里说明已解决——留着一条已经不成立的约束，比没有这张表更糟。

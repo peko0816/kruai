@@ -121,6 +121,12 @@ def _tts_problems(settings: Settings) -> list[CapabilityProblem]:
     return problems
 
 
+#: REALTIME_PROVIDER is deliberately unchecked. No realtime registry exists yet
+#: (BACKLOG F2), so there is nothing to resolve a name against — misconfiguring
+#: it today has no symptom and no consequence. Add a _realtime_problems() here
+#: when that adapter lands, or a bad value will reach the first Pro session.
+
+
 def _llm_problems(settings: Settings) -> list[CapabilityProblem]:
     """No routing axis, so the only failure is a name that does not exist."""
     try:
