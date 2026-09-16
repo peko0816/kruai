@@ -296,3 +296,48 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   可直接用 `sign_payload`）、部署配置。
 - 保障：已做变异验证——去掉守卫会让 3 个测试转红；验签失败仍解出数据会让
   「拒绝的回调不得携带可用数据」转红。
+
+## D-011 「所需语言/音色」由 PRD 1.3 的 V1 范围声明，不做成配置项
+
+- 日期：2026-09-16
+- 背景：B5 要求「检查所配 provider 是否覆盖**所需语言**」，验收是
+  「故意配错 → 启动报错并指明缺哪个语言」。但「所需」是谁定的？
+  `CONFIG_REFERENCE` 里没有语言清单。
+- 选择：在 `selfcheck.py` 里以模块常量声明，不新增配置项。
+  - `REQUIRED_LANGUAGES = (Language.ZH_CN,)`
+  - `REQUIRED_VOICES = (KM_NARRATOR, KM_FEEDBACK, ZH_MODEL)`
+- 理由：R3 要求进配置的是**阈值、权重、限额**——那些会因为线上数据而改变。
+  而「V1 只做中文」是 PRD 1.3 定死的产品范围，不是运维可调的旋钮：
+  **没有英文内容包，任何部署都无法服务英文**，给它一个配置开关等于暗示
+  它可调，而调了也没用。同理 `EN_MODEL` 音色在 v2 之前没有意义。
+  v2 接入英文时，这两行与英文内容包一起改，是同一次变更的两个部分。
+- 备选与放弃原因：
+  1. 新增 `REQUIRED_LANGUAGES` 配置项 —— 需走 CONFIG_REFERENCE 全流程，
+     且新增一个 V1 内不会有人改、改了也无效的键。
+  2. 要求覆盖 `Language` 枚举的全部成员 —— 会让所有只配中文的正常部署失败。
+  3. 从数据库里已导入的 content pack 推导 —— 启动期查库、耦合过重，
+     且空库会推导出「什么都不需要」，检查形同虚设。
+- 回退成本：低。若将来确需按部署调整，加配置项并让常量作为默认值即可。
+- 影响范围：`app/services/selfcheck.py`、v2 英文接入。
+
+## D-012 引入 `ProviderConfigurationError`（继承 `ValueError`），供自检精确捕获
+
+- 日期：2026-09-16
+- 背景：B1–B4 的四个 registry 都抛 `ValueError`（按 CODING_STANDARDS 5.1
+  第三类「编程/部署错误抛原生异常」）。B5 要捕获并**聚合**这些错误，
+  但 `except ValueError` 会同时吞掉 provider 工厂内部的真实 bug——
+  于是一个代码缺陷会被报成「部署配置有误」，把值班的人送去错误的文件。
+- 选择：新增 `app/services/provider_errors.py`，定义
+  `ProviderConfigurationError(ValueError)`，四个 registry 的 9 处抛出点全部改用它。
+- 为什么继承 `ValueError` 而不是 `Exception`：现有 15 个测试写的是
+  `pytest.raises(ValueError)`，继承使它们**一字不改仍然正确**；
+  同时语义上它确实是「值不合法」。自检则捕获精确类型。
+- 为什么不放进 `core/errors.py`：那个文件的 docstring 已写明只收
+  `AppError` 子类（业务规则未满足），并解释了为何不收 ConfigurationError。
+  provider 配置错误是第三类，不是业务规则。
+- 为什么现在才抽：B1 时只有一处，按「三行重复胜过过早抽象」保持了 `ValueError`。
+  到 B5 才出现**功能性需求**（聚合器必须区分两类异常），此时抽取有明确理由。
+- 回退成本：低。该类只有一个定义点，改回 `ValueError` 是机械替换。
+- 影响范围：四个 `registry.py`、`selfcheck.py`。
+- 保障：已做变异验证——把捕获放宽成 `except Exception` 会让
+  `test_a_genuine_bug_in_a_factory_is_not_reported_as_misconfiguration` 转红。

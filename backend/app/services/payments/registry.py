@@ -19,6 +19,7 @@ from collections.abc import Callable
 from app.core.config import Settings
 from app.services.payments.base import PaymentProvider
 from app.services.payments.fake import FakePaymentProvider
+from app.services.provider_errors import ProviderConfigurationError
 
 #: Two entries, one class. ARCHITECTURE 3.4 requires both renewal paths to work,
 #: and the business layer must not assume either, so both capabilities are
@@ -47,7 +48,7 @@ def build_payment_provider(name: str, *, settings: Settings) -> PaymentProvider:
         ValueError: no such implementation, or a test provider under ENV=prod.
     """
     if name in _TEST_ONLY_PROVIDERS and settings.env == "prod":
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"payment provider {name!r} signs with a key published in its own source; "
             "configuring it with ENV=prod would accept forged callbacks. Set "
             "PAYMENT_PROVIDERS to a real acquirer."
@@ -55,7 +56,7 @@ def build_payment_provider(name: str, *, settings: Settings) -> PaymentProvider:
 
     factory = _FACTORIES.get(name)
     if factory is None:
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"unknown payment provider {name!r}; implemented: {list(available_providers())}"
         )
     return factory()
@@ -76,7 +77,7 @@ def get_payment_provider(name: str, *, settings: Settings) -> PaymentProvider:
             a channel nobody enabled is not something to process on trust.
     """
     if name not in settings.payment_providers:
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"payment provider {name!r} is not enabled; "
             f"PAYMENT_PROVIDERS is {list(settings.payment_providers)}"
         )
@@ -94,7 +95,7 @@ def provider_for_currency(currency: str, *, settings: Settings) -> PaymentProvid
         if currency in provider.supported_currencies:
             return provider
 
-    raise ValueError(
+    raise ProviderConfigurationError(
         f"no enabled payment provider settles {currency}; "
         f"PAYMENT_PROVIDERS is {list(settings.payment_providers)}"
     )

@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.core.config import Settings
+from app.services.provider_errors import ProviderConfigurationError
 from app.services.tts.base import TTSProvider, Voice
 from app.services.tts.fake import FakeTTS
 
@@ -37,7 +38,7 @@ def build_tts(name: str) -> TTSProvider:
     """
     factory = _FACTORIES.get(name)
     if factory is None:
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"unknown tts provider {name!r}; implemented: {list(available_providers())}"
         )
     return factory()
@@ -54,7 +55,7 @@ def get_tts(voice: Voice, *, settings: Settings) -> TTSProvider:
     """
     provider = build_tts(settings.tts_provider)
     if voice not in provider.available_voices():
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"tts provider {provider.name!r} has no voice for {voice.value}; "
             f"it offers {sorted(v.value for v in provider.available_voices())}"
         )

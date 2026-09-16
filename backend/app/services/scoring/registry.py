@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.core.config import Settings
+from app.services.provider_errors import ProviderConfigurationError
 from app.services.scoring.base import Language, PronunciationScorer
 from app.services.scoring.fake import FakeScorer
 
@@ -42,7 +43,7 @@ def build_scorer(name: str) -> PronunciationScorer:
     """
     factory = _FACTORIES.get(name)
     if factory is None:
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"unknown scoring provider {name!r}; implemented: {list(available_providers())}"
         )
     return factory()
@@ -71,7 +72,7 @@ def get_scorer(language: Language, *, settings: Settings) -> PronunciationScorer
         if scorer.supports(language):
             return scorer
 
-    raise ValueError(
+    raise ProviderConfigurationError(
         f"no configured scoring provider supports {language.value}; "
         f"tried {list(chain)} (SCORING_PROVIDER + SCORING_FALLBACK_PROVIDERS)"
     )

@@ -16,6 +16,7 @@ from collections.abc import Callable
 from app.core.config import Settings
 from app.services.llm.base import LLMProvider
 from app.services.llm.fake import FakeLLM
+from app.services.provider_errors import ProviderConfigurationError
 
 _FACTORIES: dict[str, Callable[[], LLMProvider]] = {
     "fake": FakeLLM,
@@ -35,7 +36,7 @@ def build_llm(name: str) -> LLMProvider:
     """
     factory = _FACTORIES.get(name)
     if factory is None:
-        raise ValueError(
+        raise ProviderConfigurationError(
             f"unknown llm provider {name!r}; implemented: {list(available_providers())}"
         )
     return factory()

@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test migrate run clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run clean
 
 help:
 	@echo "KruAI make targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  make fmt-check  ruff format --check"
 	@echo "  make type       mypy --strict"
 	@echo "  make test       pytest"
+	@echo "  make selfcheck  verify the configured providers cover what V1 needs"
 	@echo "  make migrate    alembic upgrade head (available after A4)"
 	@echo "  make run        uvicorn app.main:app --reload (available after api scaffolding)"
 
@@ -39,6 +40,11 @@ type:
 
 test:
 	$(UV_RUN) pytest
+
+# Reads the real .env, so it catches a deployment the test suite cannot see.
+# Exits non-zero when a configured provider cannot do its job.
+selfcheck:
+	$(UV_RUN) python -m app.services.selfcheck
 
 migrate:
 	$(UV_RUN) alembic upgrade head
