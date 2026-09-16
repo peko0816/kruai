@@ -341,3 +341,44 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 影响范围：四个 `registry.py`、`selfcheck.py`。
 - 保障：已做变异验证——把捕获放宽成 `except Exception` 会让
   `test_a_genuine_bug_in_a_factory_is_not_reported_as_misconfiguration` 转红。
+
+## D-013 `cost_ledger` 写入使用独立 session，不加入调用方事务
+
+- 日期：2026-09-16
+- 背景：ARCHITECTURE 2.1 的 attempt 链路是
+  `额度校验 → scoring → cost_ledger → attempts 落库 → mastery → 复习队列`。
+  最自然的实现是让记账加入同一个事务。PRD 与 ARCHITECTURE 都没说该不该这样。
+- 选择：`CostLedger._persist()` **自己开一个 session 并 commit**，
+  与调用方的业务事务完全无关。
+- 理由：**钱已经花掉了，与业务事务提没提交无关。**
+  若共用事务，业务回滚会连带删掉记账行——而回滚恰恰发生在出问题的请求上，
+  也就是最需要留痕的那些。这会把 CLAUDE.md 第 8 节的规则反过来实现：
+  「没有记账的调用等于没有发生过」变成「出错的调用自动变成没发生过」。
+  ARCHITECTURE 第 5 节说 scoring 失败时「不扣额度、不写 attempts」——
+  但没说不记成本，因为超时往往在请求已发出之后，钱照付。
+- 附带的同类决定：`external_call` 用 `try/finally`，**异常传播时仍然落盘
+  已记录的成本**。调用已经发生，之后抛出的异常是另一个问题，不该抹掉花钱的证据。
+- 代价：每次外部调用多一次数据库往返。相对于外部调用本身（100ms 起）可忽略。
+- 备选与放弃原因：
+  1. 共用调用方 session —— 见上，会丢掉最该留的记录。
+  2. 先写记账再提交、后续business 另开事务 —— 等于把顺序耦合塞给每个调用方，
+     一旦有人写反就静默失效。
+- 回退成本：低。`_persist` 是唯一写入点，改为接收外部 session 即可。
+- 影响范围：`app/services/cost_ledger.py`、D3（attempt 链路）、D5（成本看板）。
+- 保障：两个集成测试直接验证——业务事务回滚后记账行仍在、
+  记账后抛异常仍然落盘。变异验证：去掉 `commit` 或去掉 `finally` 都会转红。
+
+## D-014 `unit` 与 `ref` 用 `Literal` 而非自由字符串
+
+- 日期：2026-09-16
+- 背景：`DATA_MODEL.sql` 把 `cost_ledger.unit` 与 `ref` 定义为 `TEXT`，
+  并在注释里列出取值（`seconds / tokens / calls / minutes`、
+  `attempt / realtime / content_production`）。数据库层不约束。
+- 选择：Python 侧声明为 `Literal[...]`，与 DDL 注释逐字一致。
+- 理由：`/admin/costs`（D5）要按这两列聚合。一个拼错的 `"call"`（少个 s）
+  会安静地产生一个永远聚合不进任何分组的孤儿行——查账时看到的总额偏低，
+  而没有任何地方报错。类型检查把这类错误提前到写代码时。
+  不在数据库加 CHECK 约束，是因为新增取值（比如 v2 的新计量单位）
+  不应该需要一次 migration。
+- 回退成本：低。改回 `str` 即可。
+- 影响范围：`app/services/cost_ledger.py`、D5。

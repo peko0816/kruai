@@ -19,8 +19,6 @@ from __future__ import annotations
 import os
 import re
 import uuid
-from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -28,74 +26,17 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import URL
 
-from app.core.config import Settings
 from app.models import Base
+from tests.integration.conftest import BACKEND_ROOT, REPO_ROOT, base_url
 
 pytestmark = pytest.mark.integration
 
-_BACKEND_ROOT = Path(__file__).resolve().parents[2]
-_REPO_ROOT = _BACKEND_ROOT.parent
-_DATA_MODEL_SQL = _REPO_ROOT / "docs" / "DATA_MODEL.sql"
+_DATA_MODEL_SQL = REPO_ROOT / "docs" / "DATA_MODEL.sql"
 
 # Alembic bookkeeping is not part of the data model.
 _IGNORED_TABLES = ("alembic_version",)
-
-
-def _base_url() -> URL:
-    settings = Settings(_env_file=_REPO_ROOT / ".env.example")
-    return make_url(settings.database_url)
-
-
-@pytest.fixture(scope="session")
-def admin_engine() -> Iterator[sa.Engine]:
-    """Connection to the maintenance database, for CREATE/DROP DATABASE.
-
-    Skipping locally is a convenience for anyone without Docker running. In CI
-    it is a trap: these are the only guards that the schema still matches
-    DATA_MODEL.sql, and a green build that silently skipped them is worse than
-    a red one. So under CI an unreachable database fails instead.
-    """
-    url = _base_url().set(database="postgres")
-    engine = sa.create_engine(url, isolation_level="AUTOCOMMIT")
-    try:
-        with engine.connect():
-            pass
-    except sa.exc.OperationalError as exc:
-        if os.environ.get("CI"):
-            raise RuntimeError(
-                "PostgreSQL unreachable in CI; the schema guards would have been "
-                "skipped. Check the postgres service definition in the workflow."
-            ) from exc
-        pytest.skip(
-            f"PostgreSQL unreachable ({exc.__class__.__name__}); run `docker compose up -d`"
-        )
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def scratch_db(admin_engine: sa.Engine) -> Iterator[URL]:
-    """A throwaway database, dropped even if the test fails.
-
-    Never reuses the configured database: these tests create and drop schemas.
-    """
-    name = f"kruai_test_{uuid.uuid4().hex[:12]}"
-    with admin_engine.connect() as conn:
-        conn.execute(sa.text(f'CREATE DATABASE "{name}"'))
-    try:
-        yield _base_url().set(database=name)
-    finally:
-        with admin_engine.connect() as conn:
-            conn.execute(
-                sa.text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    "WHERE datname = :n AND pid <> pg_backend_pid()"
-                ),
-                {"n": name},
-            )
-            conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}"'))
 
 
 def build_from_ddl(url: URL) -> None:
@@ -109,8 +50,8 @@ def build_from_ddl(url: URL) -> None:
 
 
 def alembic_config(url: URL) -> Config:
-    config = Config(str(_BACKEND_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
     # env.py reads this override so the real DATABASE_URL is never touched.
     os.environ["ALEMBIC_DATABASE_URL"] = url.render_as_string(hide_password=False)
     return config
@@ -226,7 +167,7 @@ def test_models_emit_the_same_schema_as_the_ddl(scratch_db: URL, admin_engine: s
     other = f"kruai_test_{uuid.uuid4().hex[:12]}"
     with admin_engine.connect() as conn:
         conn.execute(sa.text(f'CREATE DATABASE "{other}"'))
-    from_models = _base_url().set(database=other)
+    from_models = base_url().set(database=other)
     try:
         engine = sa.create_engine(from_models)
         try:
@@ -259,7 +200,7 @@ def test_migration_reproduces_data_model_sql(scratch_db: URL, admin_engine: sa.E
     other = f"kruai_test_{uuid.uuid4().hex[:12]}"
     with admin_engine.connect() as conn:
         conn.execute(sa.text(f'CREATE DATABASE "{other}"'))
-    migrated = _base_url().set(database=other)
+    migrated = base_url().set(database=other)
     try:
         build_from_migration(migrated)
         actual = fingerprint(migrated)
