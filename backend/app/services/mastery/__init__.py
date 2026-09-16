@@ -20,6 +20,13 @@ from app.services.mastery.delta import (
     score_delta,
     weight_for,
 )
+from app.services.mastery.review import (
+    REVIEW_DURATION_CHOICES,
+    ReviewCandidate,
+    ReviewQueue,
+    build_review_queue,
+    due_candidates,
+)
 from app.services.mastery.sm2 import (
     INITIAL_INTERVAL_DAYS,
     ReviewSchedule,
@@ -32,12 +39,17 @@ __all__ = [
     "INITIAL_INTERVAL_DAYS",
     "MASTERY_CEILING",
     "MASTERY_FLOOR",
+    "REVIEW_DURATION_CHOICES",
     "MasteryUpdate",
+    "ReviewCandidate",
+    "ReviewQueue",
     "ReviewSchedule",
     "ScheduleBand",
     "ScorableItemType",
     "apply_attempt",
+    "build_review_queue",
     "clamp_mastery",
+    "due_candidates",
     "initial_ease_factor",
     "is_passing",
     "schedule_review",
