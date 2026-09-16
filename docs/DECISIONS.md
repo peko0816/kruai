@@ -226,3 +226,38 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   `CONFIG_REFERENCE`。判据是 CODING_STANDARDS 第 4 节那句「这个数字有没有
   可能因为线上数据而改变」——不会，真实 provider 落地后会报自己的真实成本，
   这两个常量随 fake 一起退场。
+
+## D-009 `FakeLLM` 只支持 JSON Schema 的一个子集，超出范围时明确失败而非猜测
+
+- 日期：2026-09-16
+- 背景：ARCHITECTURE 3.2 要求 `FakeLLM`「按 `json_schema` 生成结构合法的最小
+  占位内容」，但没说要支持 JSON Schema 的哪些构造。完整实现整个规范
+  （`allOf` 组合、条件式 `if/then`、`patternProperties`、远程 `$ref`…）
+  对一个测试替身来说是本末倒置。
+- 选择：实现一个够用的子集，**超出范围时抛
+  `UnsupportedSchemaError`，由 `complete()` 转成
+  `ok=False` + `error_code="llm.schema_unsupported"`，并在消息里点名是哪个
+  构造、在哪个路径**。
+- 已支持：`type`（含类型联合数组）、`properties` / `required`、
+  `items` / `minItems` / `maxItems`、`minLength` / `maxLength`、
+  `minimum` / `exclusiveMinimum`、`const`、`enum`、`anyOf` / `oneOf`（取首支）、
+  本地 `$ref`（`#/...`，含 `~0`/`~1` 转义）。
+- 未支持（会明确失败）：远程 `$ref`、元组形式的 `items`、`allOf`、
+  `if/then/else`、`patternProperties`、`additionalProperties` 作为 schema。
+- 理由：base 契约写明「`json_schema` 非空时保证返回可解析，否则 `ok=False`」。
+  对不认识的构造**静默产出一个不满足 schema 的值**，恰好是最难发现的那种
+  违约——E3 会拿它继续跑，E4 校验时报出一堆看似内容问题的错误，
+  真正的原因藏在两层之外。明确失败并点名构造，五秒就能定位。
+- 对 E3 的约束：写 `generate.py` 的生成 schema 时，若用到上面「未支持」列表里的
+  构造，全 fake 配置下管线会停在那一条并给出明确原因。届时要么改 schema，
+  要么给这个 fake 补上那个构造——两条路都比静默产出错数据好。
+- 备选与放弃原因：
+  1. 遇到不认识的构造就返回 `{}` 或 `None` —— 静默违约，见上。
+  2. 引入 `jsonschema` 的实例生成能力到**应用代码** —— 该库只做校验不做生成，
+     且让运行时代码依赖一个纯测试用途的库不值当。
+- 回退成本：低。补一个构造就是 `minimal_instance` 里加一个分支。
+- 影响范围：`app/services/llm/fake.py`、E3（`generate.py` 的 schema 设计）。
+- 保障：`tests/unit/test_llm_fake.py` 用 **`jsonschema` 这个独立校验器**
+  验证产出确实满足 schema，而不是断言我们以为的形状——后者会和误解一起通过。
+  已做变异验证：忽略 `minItems` 或 `minLength` 都会被校验器抓出
+  "is too short"。

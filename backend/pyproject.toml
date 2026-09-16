@@ -26,6 +26,11 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "types-redis>=4.6",
+    # Test-only. FakeLLM claims its output satisfies the caller's json_schema;
+    # this checks that claim against a real validator instead of against our own
+    # reading of the spec. Never imported by app code.
+    "jsonschema>=4.23",
+    "types-jsonschema>=4.23",
 ]
 
 [build-system]
