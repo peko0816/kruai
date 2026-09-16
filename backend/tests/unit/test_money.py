@@ -8,11 +8,7 @@ plausible and is off by 100x.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from dataclasses import dataclass
-from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -25,11 +21,17 @@ from app.core.money import (
     minor_units_for,
     validate_money,
 )
+from app.services.payments.base import Money
 
 
 @dataclass(frozen=True)
 class FakeMoney:
-    """Structural stand-in for payments.base.Money, which does not exist yet."""
+    """A MoneyLike that is not payments.base.Money.
+
+    Kept even though the real class now exists: it can hold values the real
+    one's own __post_init__ rejects, which is how the core-level guards get
+    exercised independently of the dataclass-level ones.
+    """
 
     amount_minor: int
     currency: str
@@ -169,41 +171,31 @@ def test_format_amount_rejects_negative_minor_units() -> None:
 # -------------------------------------------------- normative interface contract
 
 
-def _load_normative_payments_base() -> ModuleType:
-    """Load interfaces/payments_base.py, the file B4 copies verbatim.
-
-    Re-point this at app.services.payments.base once B4 lands.
-    """
-    path = Path(__file__).resolve().parents[3] / "interfaces" / "payments_base.py"
-    name = "normative_payments_base"
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # Must be registered before exec: the module uses `from __future__ import
-    # annotations`, so @dataclass resolves its string annotations by looking
-    # itself up in sys.modules.
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        del sys.modules[name]
-        raise
-    return module
-
-
-def test_normative_money_satisfies_moneylike() -> None:
+def test_the_real_money_class_satisfies_moneylike() -> None:
     """core.money deliberately defines no Money class of its own.
 
     It works against the MoneyLike protocol precisely so that the normative
     payments.base.Money satisfies it without core importing the adapter layer
-    (docs/DECISIONS.md D-003). If that stops holding, this fails here rather
-    than in B4.
+    (docs/DECISIONS.md D-003). Until B4 this loaded interfaces/payments_base.py
+    by path; now the real module exists, so the contract is checked against what
+    the application actually imports.
     """
-    money_cls = _load_normative_payments_base().Money
+    assert format_money(Money(amount_minor=199, currency="USD", currency_minor_units=2)) == "$1.99"
+    assert (
+        format_money(Money(amount_minor=8000, currency="KHR", currency_minor_units=0)) == "៛8,000"
+    )
 
-    assert format_money(money_cls(amount_minor=199, currency="USD", currency_minor_units=2)) == (
-        "$1.99"
-    )
-    assert format_money(money_cls(amount_minor=8000, currency="KHR", currency_minor_units=0)) == (
-        "៛8,000"
-    )
+
+def test_the_real_money_class_is_validated_by_core() -> None:
+    """The same guards apply to it as to any MoneyLike."""
+    validate_money(Money(amount_minor=0, currency="USD", currency_minor_units=2))
+
+    with pytest.raises(ValueError, match="KHR has 0 minor units"):
+        validate_money(Money(amount_minor=8000, currency="KHR", currency_minor_units=2))
+
+
+def test_the_normative_dataclass_rejects_float_amounts_itself() -> None:
+    """payments.base.Money carries its own __post_init__ guard, independent of
+    core.money — belt and braces on the rule R4 exists for."""
+    with pytest.raises(TypeError, match="float money is a bug"):
+        Money(amount_minor=1.99, currency="USD", currency_minor_units=2)  # type: ignore[arg-type]  # the bug under test
