@@ -241,6 +241,14 @@ class Settings(BaseSettings):
             return self.limit_basic_daily_attempts
         return 0
 
+    def daily_task_limit(self, plan: Plan) -> int:
+        """Daily task allowance for a plan; 0 means unlimited.
+
+        Only Free is capped (PRD 4.3), so there is no LIMIT_BASIC_DAILY_TASKS to
+        read — paid plans return the unlimited sentinel rather than a number.
+        """
+        return self.limit_free_daily_tasks if plan == "free" else 0
+
     def monthly_cost_cap_usd_cents(self, plan: Plan) -> int:
         """Per-user monthly cost ceiling from PRD section 11.2."""
         caps: dict[str, int] = {
