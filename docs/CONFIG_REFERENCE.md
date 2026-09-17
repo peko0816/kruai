@@ -114,7 +114,7 @@
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `EXPERIMENT_EXPLAIN_MEDIA_ENABLED` | `false` | S2→S3 的视频 vs 音频对比 |
-| `EXPERIMENT_EXPLAIN_MEDIA_SPLIT` | `0.5` | |
+| `EXPERIMENT_EXPLAIN_MEDIA_SPLIT` | `0.5` | 分到 **video**（实验组）的比例。`0` = 无人，`1` = 全部；见 D-021 |
 
 ## 9. 密钥（**永远不要有默认值**）
 
