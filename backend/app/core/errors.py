@@ -56,6 +56,19 @@ class AuthenticationFailed(AppError):
     http_status = 401
 
 
+class ContentNotFound(AppError):
+    """No such course, lesson or item — or none this learner may see.
+
+    Deliberately the same answer for "does not exist" and "exists but is not
+    yours". A distinguishable 403 would turn the id space into a directory of
+    which organisations have content here (PRD 12, and the cross-org isolation
+    the M4 checklist asks for).
+    """
+
+    code = "content.not_found"
+    http_status = 404
+
+
 class InsufficientQuota(AppError):
     """Daily attempt / task allowance or realtime seconds exhausted."""
 

@@ -6,8 +6,18 @@ not a style preference, and the failure it prevents leaves no trace.
 
 Resets are per-learner local time, which brings its own set of quiet failures;
 reset.py explains those.
+
+plan.py answers the prior question — which plan a learner is on at all — by
+reading their subscriptions. It reads ``status`` and does not re-derive it from
+the dates; that state machine belongs to the renewal task (ARCHITECTURE 3.4).
 """
 
+from app.services.entitlements.plan import (
+    ENTITLING_STATUSES,
+    FREE_PLAN,
+    best_plan,
+    current_plan,
+)
 from app.services.entitlements.quota import (
     UNLIMITED,
     Entitlements,
@@ -23,6 +33,8 @@ from app.services.entitlements.reset import (
 )
 
 __all__ = [
+    "ENTITLING_STATUSES",
+    "FREE_PLAN",
     "UNLIMITED",
     "Entitlements",
     "EntitlementsMissingError",
@@ -30,6 +42,8 @@ __all__ = [
     "QuotaReset",
     "QuotaSnapshot",
     "ResetOutcome",
+    "best_plan",
+    "current_plan",
     "load_timezone",
     "next_reset_at",
 ]

@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from app.core.config import Plan, Settings
+from app.core.config import Plan, Settings, plan_rank
 
 MediaKind = Literal["audio", "video"]
 
@@ -49,10 +49,6 @@ AVATAR_DISCLAIMER_KEY: Final = "avatar.ai_disclaimer"
 #: rather than control/treatment, so a stored variant reads as itself.
 VARIANT_AUDIO: Final = "audio"
 VARIANT_VIDEO: Final = "video"
-
-#: Plan ordering, for comparing against MEDIA_VIDEO_MIN_PLAN. Structural rather
-#: than configurable: the ladder is what the plans are.
-_PLAN_RANK: Final[dict[str, int]] = {"free": 0, "basic": 1, "pro": 2}
 
 
 @dataclass(frozen=True)
@@ -160,7 +156,7 @@ def _decide(
         # Marked as video, never rendered — --with-video was off for this build.
         return "no_video_asset"
 
-    if _plan_rank(viewer.plan) < _plan_rank(settings.media_video_min_plan):
+    if plan_rank(viewer.plan) < plan_rank(settings.media_video_min_plan):
         return "plan_below_minimum"
 
     # A deliberate choice about someone's data bill outranks their entitlement:
@@ -182,17 +178,3 @@ def _primary_kind(decision: MediaDecision, candidate: MediaCandidate) -> MediaKi
     # Every other decision means audio — unless there is no audio either, which
     # happens when a video-only item loses its one asset.
     return "audio" if candidate.audio_url is not None else None
-
-
-def _plan_rank(plan: str) -> int:
-    """Raises on an unknown plan rather than silently ranking it lowest.
-
-    Ranking an unrecognised plan as free would quietly deny video to everyone on
-    a plan added later, and the symptom would be a support ticket rather than an
-    error.
-    """
-    try:
-        return _PLAN_RANK[plan]
-    except KeyError:
-        # Insertion order is rank order, so this lists them cheapest first.
-        raise ValueError(f"unknown plan {plan!r}; ranked plans are {list(_PLAN_RANK)}") from None
