@@ -99,6 +99,53 @@ class Entitlements:
             quota="attempts",
         )
 
+    async def release_attempt(self, user_id: uuid.UUID, *, count: int = 1) -> QuotaConsumption:
+        """Give back an attempt that was spent on a failed assessment.
+
+        A compensating action, not a general-purpose grant, and the distinction
+        is the reason this is its own method rather than ``consume_attempt(-1)``:
+        a negative consume would flow through the same guarded UPDATE as a real
+        deduction, and a bug that passed a negative count anywhere would become
+        a silent refund. ``_require_positive`` exists to stop exactly that, so
+        the legitimate case gets its own door.
+
+        The only caller is the attempts endpoint, on the path where the scorer
+        returned ok=False. ARCHITECTURE section 5: a provider failure must not
+        cost the learner an attempt (docs/DECISIONS.md D-034).
+
+        Floored at zero, so a double release — a retry of the compensation, or
+        a reset that landed in between — cannot manufacture allowance out of a
+        counter that is already empty.
+
+        Raises:
+            EntitlementsMissingError: the user has no row.
+        """
+        _require_positive(count, "count")
+
+        column = Entitlement.daily_attempts_used
+        statement = (
+            sa.update(Entitlement)
+            .where(Entitlement.user_id == user_id)
+            .values({column: sa.func.greatest(column - count, 0)})
+            .returning(column)
+        )
+
+        async with self._session_factory() as session:
+            result = await session.execute(statement)
+            used: int | None = result.scalar_one_or_none()
+            if used is None:
+                raise EntitlementsMissingError(_missing_message(user_id))
+            await session.commit()
+
+        log.info(
+            "entitlements.released",
+            user_id=str(user_id),
+            quota="attempts",
+            released=count,
+            used=used,
+        )
+        return QuotaConsumption(consumed=-count, remaining=None)
+
     async def consume_task(
         self, user_id: uuid.UUID, *, plan: Plan, count: int = 1
     ) -> QuotaConsumption:

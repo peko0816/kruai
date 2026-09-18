@@ -852,6 +852,115 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   `app/services/entitlements/plan.py`。
 - 保障：变异 O（把 pro 排到 basic 之下）在三个测试文件里共转红 7 条。
 
+## D-034 额度先扣，失败后补偿返还；返还是独立方法而不是负数扣减
+
+- 日期：2026-09-18
+- 背景：两条要求互相冲突。ARCHITECTURE 2.1 要求先校验额度再调评测
+  （用完额度的人不能触发付费调用——每日上限正是 PRD 11.2 成本上限的抓手）；
+  ARCHITECTURE 第 5 节要求 provider 失败时**不扣额度**。
+  而 `quota.py` 的原子 UPDATE 无法同时满足两者：它把校验与扣减合成一条语句，
+  没有「只校验不扣」的安全形态。
+- 选择：**先原子扣减**，评测返回 `ok=False` 时再调
+  `Entitlements.release_attempt()` 补偿返还。返还用 `GREATEST(used - n, 0)` 兜底。
+- 理由：
+  - **不能先评测后扣**：并发下十个请求都能通过前置校验、都发起付费调用，
+    然后其中几个在扣减时被拒——钱花了，用户什么也没得到。
+    这正是 `QuotaSnapshot` 文档里「永远不要拿它当闸门」的那个洞。
+  - **中间窗口的失败方向是对的**：进程在扣减与返还之间死掉，学习者损失一次
+    额度（免费档十次里的一次），而不是预算被击穿。
+  - **为什么是独立方法而不是 `consume_attempt(-1)`**：`_require_positive`
+    存在的理由就是挡住「负数扣减 = 静默返还」。让补偿走同一条路，
+    等于亲手拆掉那道防线。独立方法只有一个调用点，且日志事件名不同
+    （`entitlements.released`），运维能看出返还与扣减的比例。
+- 回退成本：低。
+- 影响范围：`app/services/entitlements/quota.py`、`app/api/v1/attempts.py`。
+- 保障：变异 A（删掉 release 调用）转红 2 条；另有「连续三次失败后额度仍为 0」。
+- 附带发现：**返还的 `GREATEST(..., 0)` 下限第一遍没有被任何测试覆盖**（变异 O 存活）。
+  它不是防御性装饰：扣减 → 评测卡住 → 学习者本地午夜到了、每日重置把计数器清零
+  → 失败返回、执行返还，计数器就变成 **-1**，学习者白得一次额度直到下次重置，
+  而 `daily_attempts_used` 列上没有 CHECK 约束，不会有任何东西报错。
+  已补三条测试（返还到零、重复返还、非正数返还被拒）。
+
+## D-035 评测失败映射为 503，且失败调用仍然记账（成本 0）
+
+- 日期：2026-09-18
+- 背景：`scoring/base.py` 规定 provider **不抛异常**，失败以
+  `ok=False + error_code` 返回，由调用方决定降级。API 层就是那个调用方，
+  它该回什么，PRD 未定义。
+- 选择：抛 `ScoringUnavailable`（`scoring.unavailable`，HTTP 503）。
+  同时**仍向 `cost_ledger` 写一行**，`unit='calls'`、`cost_usd_cents_est=0`。
+- 理由：
+  - **503 而不是 200 + `ok:false`**：Bot 与 Mini App 用状态码分支比解 body 便宜，
+    且 `code` 字段本来就是 i18n 契约（CODING_STANDARDS 5.1）。
+    这不违反「provider 不抛异常」——抛的是 API 层，是它做出的降级决定。
+  - **失败也要有账**：`external_call` 的上下文管理器要求必须 `record()`，
+    否则抛 `UnledgeredCallError`。更重要的是：**打出去的调用就是发生过的调用**。
+    今天 FakeScorer 失败报 0 成本，真实 provider 未必；而且失败率只有在
+    `/admin/costs` 里看得见才有人看。零成本行不影响求和，只增加计数。
+  - **「失败」以 `ok` 为准，不以「有没有分数」为准**。见下。
+- 回退成本：低。
+- 影响范围：`app/api/v1/attempts.py`、D5 的成本看板。
+- 保障：变异 D（不记账）转红 18 条、变异 E（只记有成本的调用）转红 3 条。
+- 附带发现：**判断失败的两个条件，第一遍只有一个被测到**（变异 C 存活）。
+  `not result.ok or result.pron_score is None` 里删掉前半段，
+  25 条集成测试全绿——因为 FakeScorer 失败时两者总是同时成立。
+  真实 provider 完全可能在 `ok=False` 的同时带回一个部分分数，
+  那时被删掉的那半段正是唯一拦住「拿一个供应商自己都不认的分数去扣额度、
+  写 attempts、推 mastery」的东西。已抽成 `usable_score()` 并单测：
+  `ok=False` 且带 88 分 → 仍然是失败。**这是这一条最值钱的一次变异。**
+
+## D-036 脚本化 item 的参考文本键定为 `payload.target_text`；缺失时抛 `ValueError`
+
+- 日期：2026-09-18
+- 背景：`lesson_items.payload` 是 JSONB，其 schema 属于 E1（seed schema），
+  而 E1 还没做。D3 现在就需要从里面取出「学习者要说的那句话」。
+- 选择：键名定为 `target_text`，`drill` / `vocab` 走 SCRIPTED 并从这里取参考文本；
+  `qa` 走 UNSCRIPTED 不取。**取不到就抛 `ValueError`（500）**，不降级。
+- 理由：
+  - 总要定一个名字，早定早对齐。**E4 的校验规则里必须加上这一条**，
+    这条决策就是给 E 阶段的接口约定。
+  - **为什么不降级成 UNSCRIPTED**：那会让一个坏掉的内容包看起来在正常工作，
+    分数还照给——只是不再对照任何参考文本。宁可 500：
+    这是我们的缺陷（包不该被导入），不是学习者的。
+  - 为什么不是 `AppError`：它不是业务规则不满足，是不变量被破坏
+    （CODING_STANDARDS 5.1 第三类）。
+- 回退成本：低，但**要和 E1/E4 对齐**；改键名时两边一起改。
+- 影响范围：`app/api/v1/attempts.py`、E1、E3、E4。
+
+## D-037 每日额度重置在请求路径上惰性执行
+
+- 日期：2026-09-18
+- 背景：C5 实现了 `QuotaReset.reset_if_due()`，但没有任何东西调用它。
+  谁来触发重置，PRD 未定义。
+- 选择：在 `POST /attempts` 进入时调用一次（扣减之前）。
+  不引入定时任务。
+- 理由：
+  - **依赖 worker 的重置就是可能不发生的重置**。RQ 没起、任务队列堵了、
+    部署漏了一个进程——症状都是「学习者今天没有额度」，而且没有报错。
+  - `reset_if_due` 的守卫 UPDATE（`reset_at <= now`）本来就写成可以每次请求都调，
+    幂等且并发安全，这是 C5 的设计意图。
+  - 代价：不消费额度的用户，其计数器在下次开口前不会归零。
+    而不开口的人没有额度问题，所以这个滞后没有症状。
+- 回退成本：低。将来若真需要定时任务（例如给「今日剩余」看板用），
+  两者可以共存，因为同一条守卫语句保证不会重复重置。
+- 影响范围：`app/api/v1/attempts.py`、D5。
+
+## D-038 不保存学习者录音；上传体积走 `ATTEMPT_MAX_AUDIO_BYTES`
+
+- 日期：2026-09-18
+- 背景：`attempts.audio_url` 列存在，但没人规定要不要往里写。
+- 选择：**留空**。录音评测完即丢，不落对象存储。
+  新增 `ATTEMPT_MAX_AUDIO_BYTES`（默认 2 MiB），分块读取，超限直接 413，
+  不进评测、不扣额度、不记账。
+- 理由：
+  - 开始保留一个人的声音是一项要**先决定**的事，不是顺手实现的默认值。
+    对象存储本来也还没接（D-002），列留着，需要时再填。
+  - **体积上限是成本闸门**：真实评测按音频时长计费，且整段要读进内存。
+    没有上限时，一次上传就能同时打穿内存与预算。
+    默认值对一条几十 KB 的 Telegram 语音来说极宽松。
+- 回退成本：低。
+- 影响范围：`app/api/v1/attempts.py`、`core/config.py`、E9。
+
 ---
 
 # 遗留约束
@@ -870,6 +979,6 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 | L-3 | `REALTIME_PROVIDER` **未纳入启动自检**。目前没有 realtime registry，没有东西可以校验它，配错了今天既无症状也无后果。该适配器落地时要在 `selfcheck.py` 补一个 `_realtime_problems()`，否则一个错值会一路走到第一次 Pro 实时会话。 | BACKLOG F2（M3 实时语音代理） | `services/selfcheck.py` 的 `_llm_problems` 上方 |
 | L-4 | `docker-compose.yml` 把两个数据存储绑在 `0.0.0.0`，且 **Redis 完全没有密码**。仓库转 private 只解决 PostgreSQL 那一半（凭据不再公开），Redis 的暴露面与仓库可见性无关——同局域网内任何人都能直连。修法是绑回 loopback：`ports: ["127.0.0.1:6379:6379"]`。已与项目所有者确认**暂缓**。 | C 阶段 Redis 开始承载真实数据时 | 见 D-001；`docker-compose.yml` |
 | L-5 | `OBJECT_STORAGE_ENDPOINT` 与 `PUBLIC_MEDIA_BASE_URL` 仍为空，**`Settings` 中必须保持可选**。声明为必填会让全 fake 配置启动失败，直接违反 G-B 验收。 | BACKLOG E6 / E7（真实对象存储） | 见 D-002；`core/config.py` |
-| L-6 | `concept_mastery.ease_factor` 在 DDL 里默认 **2.5**，而 `SM2_EASE_INITIAL` 是配置项，当前也是 2.5。**两者会漂移**——改了配置，靠数据库默认值插入的新行仍然是 2.5。写入方必须显式带上 `initial_ease_factor(settings)`，不要依赖 DDL 默认值。 | D3 写入 `concept_mastery` 时 | `services/mastery/sm2.py` 的 `initial_ease_factor` |
+| L-7 | **按当前默认参数，`ease_factor` 必然在 mastery 还很低的时候就触底，复习间隔长期停在 1 天。** 算一遍：drill 权重 0.6、`MASTERY_DELTA_BASE=40`、及格线 60，则满分一次只加 0.6 分，要爬到 `MASTERY_LOW`(60) 需要约 100 次；而在那之前每一次都落在「reset」带里，每次扣 0.2 ease，**6 次后就到 `SM2_EASE_MIN`(1.3)**。也就是说间隔重复在默认配置下几乎不生效。算法实现没错（PRD 9.2 原样如此，见 D-015/D-016），错的是参数标定。**M0-1 拿到真实分数分布后，必须连同 `MASTERY_DELTA_BASE` 与三个权重一起重新标定**，不要只调 `SCORING_PASS_THRESHOLD`。 | M0-1 结论落地时；或第一次有人问「为什么所有概念天天都要复习」 | `services/mastery/sm2.py` 的 `schedule_review`；`core/config.py` 的 `mastery_delta_base` |
 
 **处理完一条就把它从这张表里删掉**，并在对应的代码注释里说明已解决——留着一条已经不成立的约束，比没有这张表更糟。

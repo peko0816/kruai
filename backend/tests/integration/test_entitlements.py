@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -53,8 +54,20 @@ def settings_for(url: URL, **overrides: str) -> Settings:
 
 
 @pytest.fixture
-async def engine(migrated_db: URL) -> AsyncEngine:
-    return create_engine(settings_for(migrated_db))
+async def engine(migrated_db: URL) -> AsyncIterator[AsyncEngine]:
+    """Disposed at the end of the test, not left to the garbage collector.
+
+    An engine that goes out of scope still holds pooled connections, and
+    psycopg closing one from __del__ raises where nobody can catch it — pytest
+    reports that as an unraisable-exception warning against whichever test was
+    running when the collector happened to fire, which this suite turns into a
+    failure. The symptom moves around; the cause is here.
+    """
+    built = create_engine(settings_for(migrated_db))
+    try:
+        yield built
+    finally:
+        await built.dispose()
 
 
 async def provision(
@@ -379,6 +392,69 @@ async def test_concurrent_grants_all_land(engine: AsyncEngine, migrated_db: URL)
 
 
 # ------------------------------------------------------------- bad state
+
+
+# ------------------------------------------------------ releasing an attempt
+
+
+async def test_a_release_gives_the_attempt_back(engine: AsyncEngine, migrated_db: URL) -> None:
+    """The compensation D3 runs when the scorer fails (docs/DECISIONS.md D-034)."""
+    quota = service(engine, migrated_db, LIMIT_FREE_DAILY_ATTEMPTS="10")
+    user_id = await provision(engine, attempts_used=3)
+
+    await quota.release_attempt(user_id)
+
+    assert (await stored(engine, user_id)).daily_attempts_used == 2
+
+
+async def test_a_release_cannot_drive_the_counter_negative(
+    engine: AsyncEngine, migrated_db: URL
+) -> None:
+    """The floor is not defensive decoration — this sequence really happens.
+
+    A learner consumes an attempt, the scorer is slow, their local midnight
+    passes and the daily reset zeroes the counter, and only then does the
+    failure come back and release. Without the floor the counter lands at -1
+    and they carry a free extra attempt until the next reset. The column has no
+    CHECK constraint, so nothing else would catch it.
+    """
+    quota = service(engine, migrated_db, LIMIT_FREE_DAILY_ATTEMPTS="10")
+    user_id = await provision(engine, attempts_used=0)
+
+    await quota.release_attempt(user_id)
+
+    assert (await stored(engine, user_id)).daily_attempts_used == 0
+
+
+async def test_releasing_twice_for_one_deduction_stops_at_zero(
+    engine: AsyncEngine, migrated_db: URL
+) -> None:
+    quota = service(engine, migrated_db, LIMIT_FREE_DAILY_ATTEMPTS="10")
+    user_id = await provision(engine, attempts_used=1)
+
+    await quota.release_attempt(user_id)
+    await quota.release_attempt(user_id)
+
+    assert (await stored(engine, user_id)).daily_attempts_used == 0
+
+
+async def test_a_release_for_a_missing_row_says_so(engine: AsyncEngine, migrated_db: URL) -> None:
+    quota = service(engine, migrated_db)
+
+    with pytest.raises(EntitlementsMissingError):
+        await quota.release_attempt(uuid.uuid4())
+
+
+@pytest.mark.parametrize("count", [0, -1])
+async def test_a_non_positive_release_is_refused(
+    engine: AsyncEngine, migrated_db: URL, count: int
+) -> None:
+    """Otherwise the compensation path becomes a second way to spend allowance."""
+    quota = service(engine, migrated_db)
+    user_id = await provision(engine, attempts_used=1)
+
+    with pytest.raises(ValueError):
+        await quota.release_attempt(user_id, count=count)
 
 
 async def test_a_user_without_a_row_is_not_reported_as_out_of_quota(

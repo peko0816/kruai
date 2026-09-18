@@ -58,7 +58,13 @@ def initial_ease_factor(settings: Settings) -> float:
     Exists so callers read SM2_EASE_INITIAL rather than letting the database
     default supply it. concept_mastery.ease_factor defaults to 2.5 in the DDL,
     which matches today's configured value and would silently stop matching if
-    anyone changed the setting (docs/DECISIONS.md L-6).
+    anyone changed the setting.
+
+    Resolved in D3 (was constraint L-6): api/v1/attempts.py seeds every new row
+    with this function, and
+    test_a_new_row_starts_from_the_configured_ease_not_the_column_default
+    configures a different initial so the two cannot be confused. A future
+    writer of concept_mastery must do the same.
     """
     return settings.sm2_ease_initial
 

@@ -70,6 +70,7 @@
 | `REALTIME_SESSION_MAX_SECONDS` | `900` | `[$]` 单次会话硬上限 15 分钟 |
 | `REALTIME_CONTEXT_SUMMARIZE_AFTER_TURNS` | `8` | `[$]` 超过则摘要压缩 |
 | `QUOTA_RESET_HOUR_LOCAL` | `0` | 按用户时区的重置时刻 |
+| `ATTEMPT_MAX_AUDIO_BYTES` | `2097152` | `[$]` 单次上传录音上限（2 MiB）。超出直接拒绝，不进评测 |
 
 ## 5. 成本护栏 `[$]`
 
