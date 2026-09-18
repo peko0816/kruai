@@ -25,6 +25,10 @@ dependencies = [
     # are a deployment choice, and pulling them in here would make the dev
     # install differ from what a container image would install.
     "uvicorn>=0.30",
+    # Starlette parses multipart bodies only when this is installed, and
+    # POST /attempts is a file upload. Without it FastAPI raises at import of
+    # the route, not at request time.
+    "python-multipart>=0.0.9",
 ]
 
 [dependency-groups]

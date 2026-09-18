@@ -69,6 +69,38 @@ class ContentNotFound(AppError):
     http_status = 404
 
 
+class ItemNotScorable(AppError):
+    """Something was said back to a card that has nothing to say back to.
+
+    'explain' is a lecture card (PRD 9.2 gives it no mastery weight), so an
+    attempt against one is a client that has lost track of where it is — not a
+    broken server and not a missing item.
+    """
+
+    code = "attempt.item_not_scorable"
+    http_status = 422
+
+
+class AudioTooLarge(AppError):
+    """The upload exceeds ATTEMPT_MAX_AUDIO_BYTES."""
+
+    code = "attempt.audio_too_large"
+    http_status = 413
+
+
+class ScoringUnavailable(AppError):
+    """The scorer could not assess this recording.
+
+    Providers never raise (scoring/base.py) — they return ok=False so the
+    caller can choose what to do, and this is that choice made explicit at the
+    HTTP boundary. Nothing is charged and nothing is stored (ARCHITECTURE
+    section 5); the learner is asked to try again.
+    """
+
+    code = "scoring.unavailable"
+    http_status = 503
+
+
 class InsufficientQuota(AppError):
     """Daily attempt / task allowance or realtime seconds exhausted."""
 
