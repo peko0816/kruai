@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -33,6 +33,13 @@ from app.core.money import is_supported_currency
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 Plan = Literal["free", "basic", "pro"]
+
+#: RFC 7518 section 3.2: an HS256 key must be at least as long as the hash it
+#: feeds, or the signature is weaker than the algorithm claims. Not a tunable —
+#: a deployment cannot decide that a shorter key is fine. core/security.py
+#: enforces the same floor at the point of signing, which is what catches dev
+#: and staging; this one stops a short key reaching production at all.
+MIN_JWT_SECRET_LENGTH: Final = 32
 
 
 def _split_csv(value: Any) -> Any:
@@ -67,6 +74,16 @@ class Settings(BaseSettings):
     object_storage_endpoint: str = ""
     object_storage_bucket: str = "kruai-media"
     public_media_base_url: str = ""
+
+    # ---------------------------------------------------------------- 1b. 鉴权
+    #: How old a Mini App's initData may be before it is refused. Bounds the
+    #: replay window for a string that leaked out of a client; Telegram's own
+    #: guidance is to check this, and a day is what a Mini App session lasts.
+    telegram_init_data_max_age_seconds: int = Field(default=86400, gt=0)
+    #: Session token lifetime. Short because re-authenticating costs nothing —
+    #: the client still holds initData and can ask for another token — so there
+    #: is no refresh-token machinery to justify a long-lived one.
+    jwt_access_token_ttl_seconds: int = Field(default=3600, gt=0)
 
     # ------------------------------------------------------------ 2. Provider 选择
     scoring_provider: str = "fake"
@@ -224,6 +241,13 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"{[n.upper() for n in blank]} must be set when ENV=prod; "
                     "an empty signing secret means forgeable tokens"
+                )
+            secret = self.jwt_secret.get_secret_value()
+            if len(secret) < MIN_JWT_SECRET_LENGTH:
+                raise ValueError(
+                    f"JWT_SECRET must be at least {MIN_JWT_SECRET_LENGTH} characters "
+                    f"when ENV=prod (RFC 7518 section 3.2); got {len(secret)}. "
+                    "Generate one with: openssl rand -hex 32"
                 )
         return self
 

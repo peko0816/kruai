@@ -19,7 +19,7 @@ help:
 	@echo "  make test       pytest"
 	@echo "  make selfcheck  verify the configured providers cover what V1 needs"
 	@echo "  make migrate    alembic upgrade head (available after A4)"
-	@echo "  make run        uvicorn app.main:app --reload (available after api scaffolding)"
+	@echo "  make run        uvicorn --factory app.main:create_app --reload"
 
 sync:
 	$(UV) sync --directory $(BACKEND) --all-groups
@@ -49,8 +49,10 @@ selfcheck:
 migrate:
 	$(UV_RUN) alembic upgrade head
 
+# --factory because app/main.py builds the app in a function: importing that
+# module must not read .env or open a connection pool.
 run:
-	$(UV_RUN) uvicorn app.main:app --reload
+	$(UV_RUN) uvicorn --factory app.main:create_app --reload
 
 clean:
 	rm -rf $(BACKEND)/.venv $(BACKEND)/.mypy_cache $(BACKEND)/.pytest_cache $(BACKEND)/.ruff_cache

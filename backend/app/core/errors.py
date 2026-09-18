@@ -43,6 +43,19 @@ class AppError(Exception):
         return f"{type(self).__name__}(code={self.code!r}, message={self.message!r})"
 
 
+class AuthenticationFailed(AppError):
+    """The caller did not prove who they are.
+
+    One class for every way that can happen, and the reason stays in
+    ``context`` rather than in ``message``: telling a caller that the signature
+    was fine but the timestamp was stale tells a forger which half to work on.
+    The log keeps the detail; the response keeps the code.
+    """
+
+    code = "auth.invalid"
+    http_status = 401
+
+
 class InsufficientQuota(AppError):
     """Daily attempt / task allowance or realtime seconds exhausted."""
 

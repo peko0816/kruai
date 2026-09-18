@@ -45,6 +45,10 @@ _MINIMAL: dict[str, str] = {
     "JWT_SECRET": "",
 }
 
+#: 32 characters: Settings refuses anything shorter when ENV=prod
+#: (RFC 7518 section 3.2), and several tests below build a production config.
+PROD_JWT_SECRET = "a-production-length-signing-key-0"
+
 
 @pytest.fixture(autouse=True)
 def isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,7 +200,7 @@ def test_a_bad_channel_name_suppresses_the_currency_report() -> None:
 def test_a_test_provider_in_production_fails_the_boot() -> None:
     """D-010's guard reached through the self-check, which is where a deploy
     pipeline would hit it."""
-    production = settings(ENV="prod", JWT_SECRET="signing", TELEGRAM_BOT_TOKEN="bot")
+    production = settings(ENV="prod", JWT_SECRET=PROD_JWT_SECRET, TELEGRAM_BOT_TOKEN="bot")
     with pytest.raises(ProviderConfigurationError, match="published in its own source"):
         check_provider_configuration(production)
 
