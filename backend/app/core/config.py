@@ -34,6 +34,28 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 Plan = Literal["free", "basic", "pro"]
 
+#: Plan ordering, cheapest first. Structural rather than configurable: the
+#: ladder is what the plans are, and a deployment cannot reorder it. Lives here
+#: beside ``Plan`` because two places need it — media selection compares against
+#: MEDIA_VIDEO_MIN_PLAN, and entitlements picks the best of several live
+#: subscriptions — and a second copy is a second thing to get wrong.
+PLAN_RANK: Final[dict[str, int]] = {"free": 0, "basic": 1, "pro": 2}
+
+
+def plan_rank(plan: str) -> int:
+    """Rank a plan, refusing one it does not know.
+
+    Ranking an unrecognised plan as free would quietly deny video to everyone
+    on a plan added later, and the symptom would be a support ticket rather
+    than an error.
+    """
+    try:
+        return PLAN_RANK[plan]
+    except KeyError:
+        # Insertion order is rank order, so this lists them cheapest first.
+        raise ValueError(f"unknown plan {plan!r}; ranked plans are {list(PLAN_RANK)}") from None
+
+
 #: RFC 7518 section 3.2: an HS256 key must be at least as long as the hash it
 #: feeds, or the signature is weaker than the algorithm claims. Not a tunable —
 #: a deployment cannot decide that a shorter key is fine. core/security.py
