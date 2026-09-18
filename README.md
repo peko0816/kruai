@@ -12,7 +12,7 @@
 
 ```bash
 docker compose up -d          # PostgreSQL 16 + Redis 7
-cp .env.example .env          # 72 个配置项，全部 provider 默认 fake
+cp .env.example .env          # 74 个配置项，全部 provider 默认 fake
 make sync                     # 装依赖
 make migrate                  # 建表（21 张，对齐 docs/DATA_MODEL.sql）
 make check                    # lint + format + mypy strict + pytest
@@ -25,7 +25,7 @@ make check                    # lint + format + mypy strict + pytest
 | `make check` | 提交前必须全绿：`ruff` + `ruff format` + `mypy --strict` + `pytest` |
 | `make fmt` | 格式化（写入） |
 | `make migrate` | `alembic upgrade head` |
-| `make run` | 启动 API（API 骨架落地后可用） |
+| `make run` | 启动 API（`uvicorn --factory app.main:create_app`） |
 | `make sync` | 同步依赖 |
 
 没起数据库时，schema 一致性的集成测试会跳过并提示；CI 里则会直接失败，不允许静默跳过。
@@ -46,7 +46,8 @@ M0 外部验证（发音评测选型 / 高棉语 TTS 选型 / 支付联通）**�
 
 ```
 backend/          FastAPI 后端
-  app/core/         配置、日志、错误、金额
+  app/api/          HTTP 层（鉴权、编排，不写业务判断）
+  app/core/         配置、日志、错误、金额、鉴权
   app/models/       SQLAlchemy 模型（严格对齐 docs/DATA_MODEL.sql）
   app/services/     适配层（scoring/tts/payments/llm）+ 领域层
   alembic/          数据库迁移

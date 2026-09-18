@@ -17,6 +17,14 @@ dependencies = [
     "structlog>=24.4",
     "httpx>=0.27",
     "python-telegram-bot>=21.6",
+    # Session tokens. Hand-rolling HS256 is thirty lines and one of them is the
+    # alg-confusion check everybody forgets; this library pins the algorithm and
+    # validates exp/iss itself.
+    "pyjwt>=2.9",
+    # ASGI server behind `make run`. No [standard] extra: uvloop and httptools
+    # are a deployment choice, and pulling them in here would make the dev
+    # install differ from what a container image would install.
+    "uvicorn>=0.30",
 ]
 
 [dependency-groups]

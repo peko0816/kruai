@@ -642,6 +642,129 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   逃过了测试。改成由一个未提交的竞争行**强制**造出冲突，才真正钉住这条路径。
   并发测试写了不等于测到了。
 
+## D-024 鉴权放 `core/security.py`，开户放 API 层，不新建 service 包
+
+- 日期：2026-09-18
+- 背景：D1 需要三样东西：验签、签发 JWT、把一个 Telegram 账号变成
+  `users` 行。PRD 15.1 把 `core/` 写成「配置、鉴权、日志」，但没说开户归谁。
+- 选择：
+  - 纯密码学（initData 验签、JWT 签发与校验）→ `app/core/security.py`，不碰 IO，全单测；
+  - 开户（`users` / `user_profiles` / `entitlements` 三行）→ `app/api/v1/auth.py`。
+- 理由：
+  - **不新建 `services/accounts/`**：G-C 的 `test_every_package_under_services_is_classified`
+    要求 `services/` 下每个包非领域即适配。开户要连库，塞进领域层就是
+    D-018 之后的**第三个**例外——例外多到第三个，规则本身就不成立了。
+  - **API 层不写业务判断，但开户不是判断**。额度够不够、这一轮算不算过、
+    该给视频还是音频，这些都是判断，仍然在领域层。
+    「把已验签的身份落成一行」没有可判断的东西。
+  - 将来 D6 的 Bot 也不需要自己开户：它走这个端点。
+- 回退成本：低。若日后确实出现第二个开户入口，把
+  `provision_account` 原样搬到 `services/accounts/` 并在分层测试里登记即可。
+- 影响范围：`app/api/v1/auth.py`、`app/core/security.py`。
+
+## D-025 JWT 只携带身份，1 小时过期，不做 refresh token
+
+- 日期：2026-09-18
+- 背景：token 里放什么、活多久，PRD 第 10 节只写了「签发 JWT」。
+- 选择：claims 只有 `sub` / `iss` / `iat` / `exp`。TTL 走
+  `JWT_ACCESS_TOKEN_TTL_SECONDS`，默认 3600。没有 refresh token。
+- 理由：
+  - **不放 plan**：套餐在 token 有效期内会变（付款、grace 到期、降级）。
+    一个写着 `plan=pro` 的 token 是**任何撤销都够不到的权益**。
+    每次请求从库里读，慢一点，但只有一个真相。
+  - **不放 locale / quota**：同理，而且 `user_profiles` 本来就要读。
+  - **不做 refresh token**：客户端手里一直有 initData，重新换发是一次
+    HTTP 往返，没有交互成本。refresh token 要另配一套存储、撤销与轮换，
+    为一个能免费重来的动作加一整套状态机不划算。
+  - **`iss` 钉死为 `kruai` 且解码时校验**：共用密钥的另一个服务签出的 token
+    不能在这里花掉。它不是配置项——改它等于让所有在用会话立刻失效。
+- 回退成本：低。加 claim 是加法；TTL 已是配置项。
+- 影响范围：`app/core/security.py`、D2 之后所有受保护端点。
+- 保障：变异 F（去掉 `issuer=`）、变异 G（去掉 `require`，即允许无 `exp` 的
+  永久 token）各转红一条。
+
+## D-026 密钥缺失或过短时抛 `ValueError`（500），而不是拒绝登录（401）
+
+- 日期：2026-09-18
+- 背景：`ENV=dev` 的 `TELEGRAM_BOT_TOKEN` 与 `JWT_SECRET` 按 D-004 是空的
+  （CI 必须能在无凭据下跑通）。那么空密钥下来了一个 initData，该怎么办？
+- 选择：抛 `ValueError`，走 500。**不是** `AuthenticationFailed`。
+  同时给 `JWT_SECRET` 加 32 字符下限（RFC 7518 3.2），
+  `ENV=prod` 在启动期校验，`_signing_secret` 在签名点再校验一次。
+- 理由：
+  - **空密钥不是「验不过」，是「验不了」**。HMAC 用空 key 照样算出一个
+    合法摘要——一个**任何人都能复现**的摘要。若返回 401，症状是
+    「所有人都登不上」；若不拦，症状是「所有人都能伪造」。两者都必须
+    区别于真实的伪造尝试，因为责任方不同：一个是运维，一个是攻击者。
+  - **为什么不能放到启动自检**：dev 与 CI 的空密钥是**正确配置**，
+    自检拦下就等于 G-B 不成立。所以只能在使用点拦。
+  - **32 字符下限**：PyJWT 对短 key 只发 warning，而 warning 不是控制手段
+    （本仓库 `filterwarnings=["error"]` 恰好让它在测试里现了形）。
+    prod 启动期就拦，是为了不把它留到第一个用户登录时才炸。
+- 回退成本：低。两处判断，常量在 `core/config.py`。
+- 影响范围：`app/core/security.py`、`app/core/config.py`。
+- 保障：变异 B（去掉空 token 判断）与变异 H（下限改成 1）各转红。
+
+## D-027 `auth_date` 只卡过去一侧，不为时钟偏移设容差常量
+
+- 日期：2026-09-18
+- 背景：initData 的 `auth_date` 用来限制重放窗口。落在未来的时间戳怎么办，
+  Telegram 文档没说，常见实现各不相同。
+- 选择：只在 `now - auth_date > TELEGRAM_INIT_DATA_MAX_AGE_SECONDS` 时拒绝。
+  未来时间一律放行，**不引入「允许超前 N 秒」的常量**。
+- 理由：
+  - 带着有效签名、且时间在未来的 initData，只可能来自 Telegram——
+    别人造不出签名。那说明**他们的钟比我们快**，拒绝它等于把对方的
+    时钟偏移变成我们的故障。
+  - 引入容差就要回答「N 是多少」，而那个数字一旦写下就是 R3 说的硬编码阈值，
+    却又没有任何线上数据能用来校准它。不引入这个问题更干净。
+- 回退成本：低。一处比较。
+- 影响范围：`app/core/security.py`。
+- 保障：变异 E（窗口放大一千倍）转红三条。
+
+## D-028 `signature` 字段留在 HMAC 校验串里
+
+- 日期：2026-09-18
+- 背景：Telegram 近年给 initData 加了 `signature`（Ed25519，供第三方验证）。
+  「删掉 hash 和 signature」这句话出现在他们文档的**第三方验证**小节，
+  很容易被读成对 HMAC 校验也成立。
+- 选择：HMAC 校验串只排除 `hash`，其余字段（含 `signature`）全部保留，
+  与 aiogram 等参考实现一致。
+- 理由：照第三方那套删掉 `signature`，**每一个真实登录都会失败**，
+  而本地用假数据自测时一切正常——因为造数据的人往往不加这个字段。
+  这是最容易在上线当天才暴露的一类错误，所以单独写一条测试
+  （`test_unknown_fields_stay_inside_the_signature`）盯住它。
+- 回退成本：低。
+- 影响范围：`app/core/security.py`。
+- 保障：变异 D（把 `signature` 排除出校验串）转红。
+
+## D-029 首次登录一次性开出三行；软删除账号拒绝登录而不是复活
+
+- 日期：2026-09-18
+- 背景：`entitlements.reset_at` 无数据库默认值，而 `quota.py` 把「没有
+  entitlements 行」当作**开户失败**（D-018），不当作额度为零。那这行谁来建？
+- 选择：首次登录在同一个事务里建 `users` + `user_profiles` + `entitlements`。
+  三条语句都写成再来一次也不出错（`ON CONFLICT`）。
+  `users.deleted_at` 非空时拒绝登录，并**回滚**（不留下 `last_active_at` 痕迹）。
+- 理由：
+  - **不做懒创建**：懒创建意味着每个读额度的地方都要先处理「行不存在」，
+    那正是 D-018 想避免的分支。出生即完整。
+  - **`reset_at` 用 `next_reset_at()` 算**，与每日重置任务同一个函数；
+    `timezone` 从刚插入的 `user_profiles` 行 RETURNING 回来，
+    而不是在 API 层再写一遍 `'Asia/Phnom_Penh'`——DDL 的默认值是唯一真相。
+  - **locale 只在 insert 时写**：Telegram 的 `language_code` 是首次的合理猜测，
+    不是长期指令。否则用户在应用内改了界面语言，下次登录就被悄悄改回去。
+  - **软删除不复活**：`deleted_at` 是删除，不是休眠标记。重新登录就撤销删除，
+    等于删除从来没生效过。
+- 回退成本：低。
+- 影响范围：`app/api/v1/auth.py`、D3（读 entitlements）、D8a（订阅开通）。
+- 保障：变异 I（登录顺手把当日额度清零）与变异 J（允许软删账号登录）各转红。
+- 附带发现：**第一轮变异测试十二条全部「转红」，而那个结果是假的。**
+  跑测试的子进程继承了 macOS 的 `__PYVENV_LAUNCHER__`，venv 里的 pytest
+  直接 `ModuleNotFoundError`——退出码非零，和「变异被抓住」一模一样。
+  改成清理环境变量、并要求输出里必须出现 pytest 的统计行之后重跑，
+  才是真的十二条全红。**一个坏掉的 runner 会把每一条变异都报成成功。**
+
 ---
 
 # 遗留约束

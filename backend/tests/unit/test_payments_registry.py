@@ -37,6 +37,10 @@ _MINIMAL: dict[str, str] = {
     "JWT_SECRET": "",
 }
 
+#: 32 characters: Settings refuses anything shorter when ENV=prod
+#: (RFC 7518 section 3.2), and several tests below build a production config.
+PROD_JWT_SECRET = "a-production-length-signing-key-0"
+
 
 @pytest.fixture(autouse=True)
 def isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,7 +54,7 @@ def settings(**overrides: str) -> Settings:
 
 
 def production(**overrides: str) -> Settings:
-    return settings(ENV="prod", JWT_SECRET="signing", TELEGRAM_BOT_TOKEN="bot", **overrides)
+    return settings(ENV="prod", JWT_SECRET=PROD_JWT_SECRET, TELEGRAM_BOT_TOKEN="bot", **overrides)
 
 
 # ------------------------------------------------------------- default wiring

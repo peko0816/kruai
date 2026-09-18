@@ -37,6 +37,10 @@ _MINIMAL: dict[str, str] = {
     "JWT_SECRET": "",
 }
 
+#: 32 characters: Settings refuses anything shorter when ENV=prod
+#: (RFC 7518 section 3.2), and several tests below build a production config.
+PROD_JWT_SECRET = "a-production-length-signing-key-0"
+
 
 @pytest.fixture(autouse=True)
 def isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -233,13 +237,19 @@ def test_prod_rejects_blank_signing_secret() -> None:
         build(ENV="prod", TELEGRAM_BOT_TOKEN="t", JWT_SECRET="")
 
 
+def test_prod_rejects_a_secret_shorter_than_the_hash() -> None:
+    """RFC 7518 section 3.2: an HS256 key below 32 bytes weakens the signature."""
+    with pytest.raises(ValidationError, match="RFC 7518"):
+        build(ENV="prod", TELEGRAM_BOT_TOKEN="t", JWT_SECRET="x" * 31)
+
+
 def test_prod_rejects_whitespace_only_secret() -> None:
     with pytest.raises(ValidationError, match="JWT_SECRET"):
         build(ENV="prod", TELEGRAM_BOT_TOKEN="t", JWT_SECRET="   ")
 
 
 def test_prod_accepts_populated_secrets() -> None:
-    settings = build(ENV="prod", TELEGRAM_BOT_TOKEN="bot-token", JWT_SECRET="signing-key")
+    settings = build(ENV="prod", TELEGRAM_BOT_TOKEN="bot-token", JWT_SECRET=PROD_JWT_SECRET)
     assert settings.is_production is True
 
 
