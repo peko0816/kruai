@@ -41,7 +41,15 @@ LedgerUnit = Literal["seconds", "tokens", "calls", "minutes"]
 
 #: What the spend was for. 'content_production' is kept out of per-user
 #: operating cost (PRD 11.3) — pack builds are one-off, not a monthly burden.
-LedgerRef = Literal["attempt", "realtime", "content_production"]
+#:
+#: 'payment' rows are written with a cost of zero, on purpose (D-075). The
+#: acquirer's fee is a percentage of the transaction, so charging it to the
+#: learner who paid it would mean that subscribing moves someone closer to
+#: their own cost ceiling — a learner throttled for having paid us. What the
+#: row is for is the other half of CLAUDE.md section 8: a call that happened
+#: leaves a trace, so the call count, the failure rate and which channel is
+#: flaky are all visible in /admin/costs rather than only in the logs.
+LedgerRef = Literal["attempt", "realtime", "content_production", "payment"]
 
 
 class UnledgeredCallError(RuntimeError):

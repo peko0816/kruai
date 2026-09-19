@@ -213,7 +213,7 @@ async def test_reading_the_allowance_rolls_over_a_finished_day(
     yesterday's exhausted counters and believes they are still locked out."""
     headers = await authenticated(client)
     execute(
-        "UPDATE entitlements SET daily_attempts_used = 10, daily_tasks_used = 3, "
+        "UPDATE entitlements SET daily_attempts_used = 99, daily_tasks_used = 3, "
         "reset_at = now() - interval '1 hour'"
     )
 

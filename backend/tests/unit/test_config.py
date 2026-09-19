@@ -268,7 +268,7 @@ def test_secrets_are_not_exposed_by_model_dump() -> None:
 
 @pytest.mark.parametrize(
     ("plan", "expected"),
-    [("free", 10), ("basic", 0), ("pro", 0)],
+    [("free", 3), ("basic", 0), ("pro", 0)],
 )
 def test_daily_attempt_limit(plan: Plan, expected: int) -> None:
     assert build().daily_attempt_limit(plan) == expected

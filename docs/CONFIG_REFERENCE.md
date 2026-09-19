@@ -75,7 +75,7 @@
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `LIMIT_FREE_DAILY_TASKS` | `3` | |
-| `LIMIT_FREE_DAILY_ATTEMPTS` | `10` | |
+| `LIMIT_FREE_DAILY_ATTEMPTS` | `3` | **由 `COST_CAP_FREE_USD_CENTS_MONTHLY` 倒推出来的，不是拍的**（D-074）。PRD 11.1 把 Basic 的 20 分钟录音定价为 $0.45，即一次 4 秒的 drill 约 0.15 美分；$0.15 一个月买得起 100 次，所以每天 3 次。调高它而不同时调高成本上限，免费用户每个月都会在月中撞上限流 |
 | `LIMIT_BASIC_DAILY_ATTEMPTS` | `0` | 0 = 不限 |
 | `LIMIT_PRO_REALTIME_SECONDS_MONTHLY` | `3600` | 60 分钟 |
 | `REALTIME_SESSION_MAX_SECONDS` | `900` | `[$]` 单次会话硬上限 15 分钟 |

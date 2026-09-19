@@ -280,7 +280,7 @@ async def test_an_exhausted_allowance_is_explained_rather_than_retried(
     conversation: Conversation, unit: dict[str, uuid.UUID], execute: Execute, rows: Rows
 ) -> None:
     await conversation.on_learn(LEARNER)
-    execute("UPDATE entitlements SET daily_attempts_used = 10")
+    execute("UPDATE entitlements SET daily_attempts_used = 99")
 
     replies = await conversation.on_voice(LEARNER, audio=AUDIO)
 
@@ -304,7 +304,7 @@ async def test_an_internal_code_never_reaches_the_learner(
     conversation: Conversation, unit: dict[str, uuid.UUID], execute: Execute
 ) -> None:
     await conversation.on_learn(LEARNER)
-    execute("UPDATE entitlements SET daily_attempts_used = 10")
+    execute("UPDATE entitlements SET daily_attempts_used = 99")
 
     replies = await conversation.on_voice(LEARNER, audio=AUDIO)
 
@@ -380,7 +380,7 @@ async def test_status_reports_the_allowance_from_the_api(
     replies = await conversation.on_status(LEARNER)
 
     assert "Plan: free" in replies[0].text
-    assert "Attempts today: 1 of 10" in replies[0].text
+    assert "Attempts today: 1 of 3" in replies[0].text
 
 
 async def test_status_on_a_paid_plan_does_not_say_a_limit(

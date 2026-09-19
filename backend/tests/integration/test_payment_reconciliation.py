@@ -275,3 +275,38 @@ async def test_the_webhook_still_wins_when_it_arrives_first(
 
     assert report.examined == 0
     assert rows("SELECT count(*) FROM subscriptions") == [(0,)]
+
+
+# ------------------------------------------------------- what the call cost
+
+
+async def test_every_order_chased_leaves_a_ledger_row(
+    client: httpx.AsyncClient, settings: Settings, execute: Execute, rows: Rows
+) -> None:
+    """Asking the acquirer is an external call, recorded like any other (D-075).
+
+    This is the one that pays off: reconciliation runs on a timer against a
+    channel nobody is watching, and the row is how "we asked them two thousand
+    times last month" becomes visible before the invoice says so.
+    """
+    user_id = decode_access_token(await token_for(client), settings=settings)
+    for _ in range(3):
+        order(execute, user_id=user_id, order_id=f"kruai_{uuid.uuid4().hex}")
+
+    await reconcile(settings)
+
+    assert rows("SELECT count(*), sum(cost_usd_cents_est) FROM cost_ledger") == [(3, 0)]
+    assert rows("SELECT DISTINCT ref, unit FROM cost_ledger") == [("payment", "calls")]
+
+
+async def test_the_ledger_row_names_the_learner_the_order_belonged_to(
+    client: httpx.AsyncClient, settings: Settings, execute: Execute, rows: Rows
+) -> None:
+    """Zero cost, but not anonymous: which learner an acquirer call was about
+    is exactly what a support question asks."""
+    user_id = decode_access_token(await token_for(client), settings=settings)
+    order(execute, user_id=user_id, order_id=f"kruai_{uuid.uuid4().hex}")
+
+    await reconcile(settings)
+
+    assert rows("SELECT user_id FROM cost_ledger") == [(user_id,)]

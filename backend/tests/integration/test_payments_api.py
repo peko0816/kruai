@@ -21,6 +21,7 @@ import pytest
 
 from app.core.config import Settings
 from app.core.security import decode_access_token
+from app.services.entitlements import is_over_threshold
 from app.services.payments.fake import SIGNATURE_HEADER, sign_payload
 from app.services.provider_errors import ProviderConfigurationError
 from tests.integration.conftest import Execute, Rows, auth_header, client_for, token_for
@@ -293,7 +294,7 @@ async def test_the_plan_takes_effect_immediately(client: httpx.AsyncClient) -> N
     after = (await client.get("/api/v1/me/entitlements", headers=headers)).json()
 
     assert before["plan"] == "free"
-    assert before["attempts"]["limit"] == 10
+    assert before["attempts"]["limit"] == 3
     assert after["plan"] == "basic"
     assert after["attempts"]["limit"] is None
 
@@ -550,3 +551,60 @@ async def test_a_yearly_period_is_a_year(client: httpx.AsyncClient, rows: Rows) 
 
     start, ends = rows("SELECT period_start, period_end FROM subscriptions")[0]
     assert (ends - start) >= datetime.timedelta(days=365)
+
+
+# ------------------------------------------------------- what the call cost
+
+
+async def test_asking_the_acquirer_for_a_checkout_leaves_a_ledger_row(
+    client: httpx.AsyncClient, rows: Rows
+) -> None:
+    """CLAUDE.md section 8: a call nobody recorded did not happen (D-075).
+
+    Talking to an acquirer is an external call like any other, and the point of
+    the row is not the money -- it is being able to see, in one place, how
+    often we asked, how often they answered, and which channel is flaky.
+    """
+    headers = await authenticated(client)
+
+    await checkout(client, headers=headers, plan="basic", period="monthly")
+
+    assert rows("SELECT provider, unit, quantity, ref FROM cost_ledger") == [
+        ("fake", "calls", 1.0, "payment")
+    ]
+
+
+async def test_the_checkout_call_is_recorded_as_costing_nothing(
+    client: httpx.AsyncClient, rows: Rows
+) -> None:
+    """Zero on purpose, and this is the test that says why.
+
+    The acquirer's fee is a cut of the transaction, so charging it to the
+    learner who paid it would mean that subscribing pushes someone closer to
+    their own cost ceiling. A learner throttled for having paid us is not a
+    rounding error, it is the guardrail working backwards.
+    """
+    headers = await authenticated(client)
+
+    await checkout(client, headers=headers, plan="pro", period="yearly")
+
+    assert rows("SELECT cost_usd_cents_est FROM cost_ledger") == [(0,)]
+
+
+async def test_paying_does_not_move_a_learner_toward_the_throttle(
+    client: httpx.AsyncClient, rows: Rows, settings: Settings
+) -> None:
+    """The behaviour the zero exists for, asserted end to end.
+
+    Twenty checkouts is far more than any learner would make, and it still adds
+    nothing to what this month has cost us on their behalf.
+    """
+    headers = await authenticated(client)
+
+    for _ in range(20):
+        await checkout(client, headers=headers, plan="basic", period="monthly")
+
+    spend = rows("SELECT coalesce(sum(cost_usd_cents_est), 0) FROM cost_ledger")[0][0]
+    assert rows("SELECT count(*) FROM cost_ledger") == [(20,)]
+    assert spend == 0
+    assert not is_over_threshold(spend, plan="free", settings=settings)

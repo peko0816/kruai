@@ -246,7 +246,7 @@ CREATE TABLE cost_ledger (
     unit            TEXT NOT NULL,                    -- seconds / tokens / calls / minutes
     quantity        REAL NOT NULL,
     cost_usd_cents_est  INTEGER NOT NULL,
-    ref             TEXT                              -- 'attempt' / 'realtime' / 'content_production'
+    ref             TEXT                              -- 'attempt' / 'realtime' / 'content_production' / 'payment'
 );
 CREATE INDEX idx_cost_time ON cost_ledger(occurred_at DESC);
 CREATE INDEX idx_cost_user_month ON cost_ledger(user_id, occurred_at);

@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.db import create_engine, create_session_factory
 from app.core.logging import configure_logging, get_logger
+from app.services.cost_ledger import CostLedger
 from app.services.entitlements.pricing import UnpricedError
 from app.services.payments.base import PaymentProvider, PaymentStatus
 from app.services.payments.registry import get_payment_provider
@@ -109,7 +110,12 @@ async def charge_due_subscriptions(
         report = ChargeReport(due=len(due))
         for subscription in due:
             report = await _charge_one(
-                session, subscription=subscription, settings=settings, report=report, now=moment
+                session,
+                session_factory=session_factory,
+                subscription=subscription,
+                settings=settings,
+                report=report,
+                now=moment,
             )
         await session.commit()
 
@@ -127,6 +133,7 @@ async def charge_due_subscriptions(
 async def _charge_one(
     session: AsyncSession,
     *,
+    session_factory: Callable[[], AsyncSession],
     subscription: DueSubscription,
     settings: Settings,
     report: ChargeReport,
@@ -160,12 +167,17 @@ async def _charge_one(
         return replace(report, unchargeable=report.unchargeable + 1)
 
     order_id = f"{RECURRING_ORDER_PREFIX}_{uuid.uuid4().hex}"
-    result = await provider.charge_recurring(
-        mandate_ref=subscription.mandate_ref,
-        order_id=order_id,
-        money=terms.money,
-        product_name=f"{subscription.plan}-{terms.period}",
-    )
+    ledger = CostLedger(session_factory=session_factory, settings=settings)
+    async with ledger.external_call(
+        provider=provider.name, ref="payment", user_id=subscription.user_id
+    ) as entry:
+        result = await provider.charge_recurring(
+            mandate_ref=subscription.mandate_ref,
+            order_id=order_id,
+            money=terms.money,
+            product_name=f"{subscription.plan}-{terms.period}",
+        )
+        entry.record(unit="calls", quantity=1, cost_usd_cents=0)
     charged = result.ok and result.status is PaymentStatus.SUCCEEDED
     await renewal.record_charge(
         session,
