@@ -17,6 +17,7 @@
   "bot.prompt_qa": "[[zh:bot.prompt_qa]]",
   "bot.prompt_vocab": "[[zh:bot.prompt_vocab]]",
   "bot.quota_exhausted": "[[zh:bot.quota_exhausted]]",
+  "bot.renewal_reminder": "[[zh:bot.renewal_reminder]]",
   "bot.score_failed_moving_on": "[[zh:bot.score_failed_moving_on]]",
   "bot.score_failed_retry": "[[zh:bot.score_failed_retry]]",
   "bot.score_passed": "[[zh:bot.score_passed]]",

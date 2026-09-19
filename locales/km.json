@@ -17,6 +17,7 @@
   "bot.prompt_qa": "[[km:bot.prompt_qa]]",
   "bot.prompt_vocab": "[[km:bot.prompt_vocab]]",
   "bot.quota_exhausted": "[[km:bot.quota_exhausted]]",
+  "bot.renewal_reminder": "[[km:bot.renewal_reminder]]",
   "bot.score_failed_moving_on": "[[km:bot.score_failed_moving_on]]",
   "bot.score_failed_retry": "[[km:bot.score_failed_retry]]",
   "bot.score_passed": "[[km:bot.score_passed]]",
