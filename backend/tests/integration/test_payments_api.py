@@ -228,8 +228,11 @@ async def test_a_learner_cannot_buy_a_second_subscription(
 
     response = await checkout(client, headers=headers, plan="pro", period="yearly")
 
-    assert response.status_code == 400
-    assert response.json()["code"] == "payment.refused"
+    assert response.status_code == 409
+    assert response.json()["code"] == "payment.already_subscribed", (
+        "its own code, so a client can say 'you already have a plan' and so the "
+        "upgrade flow in BACKLOG D11 has a named branch to replace"
+    )
     assert rows("SELECT count(*) FROM subscriptions") == [(1,)]
     assert rows("SELECT count(*) FROM payments") == [(1,)], "the second order was never recorded"
 
@@ -244,7 +247,7 @@ async def test_a_learner_in_grace_cannot_start_a_second_subscription(
 
     response = await checkout(client, headers=headers, plan="basic")
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert rows("SELECT count(*) FROM subscriptions") == [(1,)]
 
 
