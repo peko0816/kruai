@@ -235,6 +235,30 @@ async def test_an_order_whose_details_are_unreadable_still_grants_something(
     assert "payments.order_details_unreadable" in caplog.text
 
 
+async def test_a_reconciled_order_keeps_the_mandate_checkout_was_given(
+    client: httpx.AsyncClient, settings: Settings, execute: Execute, rows: Rows
+) -> None:
+    """A lost callback must not quietly turn automatic renewal into manual.
+
+    The mandate arrived at checkout; the callback is simply the usual way it
+    comes back. Without keeping it, an order rescued by this job renews by
+    reminder instead of by charge, and the learner never asked for that
+    (D-066).
+    """
+    headers = auth_header(await token_for(client))
+    created = await client.post(
+        "/api/v1/payments/checkout", headers=headers, json={"plan": "basic"}
+    )
+    execute("UPDATE payments SET created_at = now() - interval '2 hours'")
+
+    await reconcile(settings)
+
+    assert created.status_code == 201
+    assert rows("SELECT renewal_mode, mandate_ref IS NOT NULL FROM subscriptions") == [
+        ("auto", True)
+    ]
+
+
 async def test_the_webhook_still_wins_when_it_arrives_first(
     client: httpx.AsyncClient, settings: Settings, execute: Execute, rows: Rows
 ) -> None:

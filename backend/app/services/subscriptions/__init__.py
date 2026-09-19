@@ -11,6 +11,7 @@ who settled a payment from turning into a decision about which vendor we use.
 
 from app.services.subscriptions.settle import (
     CALLBACK_FIELD,
+    MANDATE_FIELD,
     ORDER_DETAILS_FIELD,
     Settlement,
     activate,
@@ -19,6 +20,7 @@ from app.services.subscriptions.settle import (
 
 __all__ = [
     "CALLBACK_FIELD",
+    "MANDATE_FIELD",
     "ORDER_DETAILS_FIELD",
     "Settlement",
     "activate",

@@ -31,7 +31,7 @@ from app.core.config import Plan, Settings
 from app.core.logging import get_logger
 from app.models.commerce import Payment, Subscription
 from app.services.entitlements.pricing import BillingPeriod, period_end
-from app.services.payments.base import PaymentProvider, PaymentStatus
+from app.services.payments.base import Money, PaymentProvider, PaymentStatus
 
 log = get_logger(__name__)
 
@@ -39,6 +39,11 @@ log = get_logger(__name__)
 #: they cannot collide with whatever the acquirer sends back (D-053).
 ORDER_DETAILS_FIELD: Final = "kruai_order"
 CALLBACK_FIELD: Final = "provider_callback"
+
+#: The mandate the acquirer handed back at checkout, kept because a callback is
+#: not the only way an order gets settled: reconciliation has none to offer, and
+#: an auto subscription settled without one would silently become manual.
+MANDATE_FIELD: Final = "checkout_mandate_ref"
 
 #: What a settled order defaults to if its details are unreadable. Reached only
 #: if raw_payload was written by something other than the checkout endpoint;
@@ -51,9 +56,11 @@ _FALLBACK_PERIOD: Final[BillingPeriod] = "monthly"
 class Settlement:
     """What settling an order did."""
 
-    #: False when there was nothing to settle: no such order, or it was already
-    #: settled by a callback, a retry, or another worker.
+    #: False when there was nothing to settle: no such order, it was already
+    #: settled by a callback, a retry or another worker, or it was refused.
     granted: bool
+    #: Set when the settlement was refused rather than merely redundant.
+    refused_reason: str | None = None
     user_id: uuid.UUID | None = None
     plan: Plan | None = None
     period: BillingPeriod | None = None
@@ -68,14 +75,40 @@ async def settle_order(
     provider_ref: str | None,
     mandate_ref: str | None,
     raw: dict[str, Any],
+    paid: Money | None = None,
     settings: Settings,
     now: datetime.datetime,
 ) -> Settlement:
     """Mark an order paid and grant what it bought, at most once.
 
+    ``paid`` is what the acquirer says was actually taken, when they say. It is
+    checked against the order before anything is granted; None means they did
+    not report an amount, which is not the same as reporting a wrong one.
+
     Does not commit: the caller owns the transaction, because a webhook and a
     reconciliation job have different ideas about what else belongs in it.
     """
+    ordered = await session.execute(
+        sa.select(Payment.amount_minor, Payment.currency, Payment.currency_minor_units).where(
+            Payment.order_id == order_id
+        )
+    )
+    expected = ordered.one_or_none()
+    if expected is not None and not _amount_matches(expected, paid=paid):
+        # A correctly signed callback reporting an amount the order never asked
+        # for. The signature proves who sent it, not that they sent the right
+        # thing — partial payments and adjusted amounts are real, and granting
+        # a year of Pro against one cent is not a rounding error (D-067).
+        log.error(
+            "payments.amount_mismatch",
+            order_id=order_id,
+            expected_minor=expected[0],
+            expected_currency=expected[1],
+            paid_minor=None if paid is None else paid.amount_minor,
+            paid_currency=None if paid is None else paid.currency,
+        )
+        return Settlement(granted=False, refused_reason="amount_mismatch")
+
     claimed = await session.execute(
         sa.update(Payment)
         .where(Payment.order_id == order_id, Payment.status != PaymentStatus.SUCCEEDED.value)
@@ -102,7 +135,9 @@ async def settle_order(
         user_id=user_id,
         plan=plan,
         period=period,
-        mandate_ref=mandate_ref,
+        # The callback's mandate when there is one, otherwise the one checkout
+        # already had. A reconciled order has no callback to carry it.
+        mandate_ref=mandate_ref or (payload or {}).get(MANDATE_FIELD),
         now=now,
     )
     return Settlement(
@@ -148,6 +183,25 @@ async def activate(
     return "auto" if automatic else "manual"
 
 
+def _amount_matches(expected: Any, *, paid: Money | None) -> bool:
+    """Whether what was taken is what was ordered.
+
+    A silent acquirer is accepted — plenty of callbacks carry no amount, and
+    refusing those would break settlement for a channel that is behaving. One
+    that names a *different* amount is refused: that is either a partial
+    payment or an integration talking about another order, and both are things
+    to look at rather than to grant.
+    """
+    if paid is None:
+        return True
+    amount_minor, currency, minor_units = expected
+    return bool(
+        paid.amount_minor == amount_minor
+        and paid.currency == currency
+        and paid.currency_minor_units == minor_units
+    )
+
+
 def _ordered(payload: dict[str, Any] | None, *, order_id: str) -> tuple[Plan, BillingPeriod]:
     """What this order bought, out of the details checkout stored."""
     details = (payload or {}).get(ORDER_DETAILS_FIELD) or {}
@@ -164,4 +218,11 @@ def _ordered(payload: dict[str, Any] | None, *, order_id: str) -> tuple[Plan, Bi
     return plan, period
 
 
-__all__ = ["CALLBACK_FIELD", "ORDER_DETAILS_FIELD", "Settlement", "activate", "settle_order"]
+__all__ = [
+    "CALLBACK_FIELD",
+    "MANDATE_FIELD",
+    "ORDER_DETAILS_FIELD",
+    "Settlement",
+    "activate",
+    "settle_order",
+]
