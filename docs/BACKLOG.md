@@ -10,11 +10,11 @@
 | B Provider 抽象与 Fake | 6 | 6 | G-B 通过 |
 | C 领域层 | 7 | 7 | G-C 通过 |
 | D API 与 Bot | 12 | 10 | D9 等 M0-3，D11 等产品决策 |
-| **E 内容管线** | **9** | **3** | **在做。E1–E7 不被任何东西阻塞；下一个是 E4** |
+| **E 内容管线** | **9** | **4** | **在做。E1–E7 不被任何东西阻塞；下一个是 E5** |
 | F M3 实时语音 | 6 | 0 | G-D 之后 |
 | G M4 B 端 | 5 | 0 | G-D 之后 |
 
-**全项目 31 / 50。到 M2（C 端可交付测试）31 / 39。**
+**全项目 32 / 50。到 M2（C 端可交付测试）32 / 39。**
 
 挡在 M2 前面的只剩三样：**阶段 E 的内容**（现在就能做）、
 **ABA 凭据**（M0-3）、**km/zh 文案**。`pipeline/` 现在有 seed schema 与校验器，还没有内容。
@@ -121,7 +121,7 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | E1 | ✅ #37 | seed YAML schema 定义 + 校验器；`pipeline/seed/zh-hsk3.0/` 目录结构 | A1 | 非法 seed 被拒并指出具体字段 |
 | E2 | ✅ #38 | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
 | E3 | ✅ #39 | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
-| E4 | — | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
+| E4 | ✅ #PRNUM | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
 | E5 | — | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
 | E6 | — | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
 | E7 | — | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
@@ -150,6 +150,12 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 > 决策：D-084（生成成本先记在 draft，E7 才写 cost_ledger——**在 E7 落地前这条链是断的**）、
 > D-085（非 fake provider 必须 `--confirm-spend`）、D-086（管线可 import 适配层、
 > 不可 import 领域层）、D-087（拼音用带调符号，E4 比对前必须沿用）。
+>
+> E4 落地说明：八条规则都是纯函数，`make validate DRAFT=<path>` 跑它们。
+> 决策：D-088（去重按句子种类分组）、D-089（词表是数据、缺失即硬失败、
+> 用词表自身最长匹配分词）、D-090（拼音接受多音字全部读音）。
+> **遗留：`pipeline/wordlists/zh/hsk1.txt` 还没有，规则 1 跑不了真实数据**——
+> `make validate` 现在退出码 2，这是刻意的（DECISIONS 的 L-11）。
 
 ---
 
