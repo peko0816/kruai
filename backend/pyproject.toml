@@ -33,6 +33,9 @@ dependencies = [
     # not an API one, but the pipeline shares this venv the way bot/ shares it
     # rather than carrying a second lockfile that nobody would update.
     "pyyaml>=6.0",
+    # PRD 6.2 names it: validate.py regenerates pinyin and compares it with what
+    # the model wrote. Pipeline-only, like pyyaml. Carries its own type hints.
+    "pypinyin>=0.53",
 ]
 
 [dependency-groups]
@@ -109,6 +112,12 @@ ignore = [
 # CODING_STANDARDS section 5.1 names these exceptions normatively
 # (InsufficientQuota, NotSubscribed). The doc wins over N818's Error suffix.
 "app/core/errors.py" = ["N818"]
+# The pipeline's tests carry Chinese sentences as fixtures, and Chinese
+# sentences end in 。！？ and separate with ，. RUF001 calls those confusable
+# with ASCII punctuation, which is true and beside the point: the rules under
+# test count characters and strip punctuation, so a fixture written with ASCII
+# marks would be exercising something the content will never contain.
+"../pipeline/tests/*.py" = ["RUF001"]
 
 [tool.ruff.lint.isort]
 # The local backend/alembic/ directory makes ruff read the installed `alembic`
