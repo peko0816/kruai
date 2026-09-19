@@ -77,7 +77,7 @@ concepts:
 
   - slug: zh.hsk1.question_pronouns
     standard_ref: 一04
-    pattern: "多 / 多少 / 几 / 哪 / 哪儿 / 什么 / 谁 / 怎么 + […]"
+    pattern: "多 / 多少 / 几 / 哪 / 哪儿 / 哪里 / 哪些 / 什么 / 谁 / 怎么 + […]"
     km_explanation: "[[km:concept.zh.hsk1.question_pronouns]]"
     hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
     example_sentences:
@@ -97,7 +97,7 @@ concepts:
 
   - slug: zh.hsk1.demonstrative_pronouns
     standard_ref: 一06
-    pattern: "这 / 那 / 这儿 / 那儿 / 这些 / 那些 + […]"
+    pattern: "这 / 那 / 这儿 / 那儿 / 这里 / 那里 / 这些 / 那些 / 别的 / 有的 + […]"
     km_explanation: "[[km:concept.zh.hsk1.demonstrative_pronouns]]"
     hskk_task_types: [listen_and_repeat, listen_and_answer]
     example_sentences:
@@ -497,7 +497,7 @@ concepts:
 
   - slug: zh.hsk1.ask_with_question_words
     standard_ref: 一46
-    pattern: "[疑问代词] 提问"
+    pattern: "用 多 / 多少 / 几 / 哪 / 哪儿 / 哪里 / 哪些 / 什么 / 谁 / 怎么 提问"
     km_explanation: "[[km:concept.zh.hsk1.ask_with_question_words]]"
     hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
     example_sentences:
