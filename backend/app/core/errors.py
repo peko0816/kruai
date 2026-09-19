@@ -127,6 +127,23 @@ class ScoringUnavailable(AppError):
     http_status = 503
 
 
+class PaymentRefused(AppError):
+    """An order we will not take, or a callback we will not believe.
+
+    One class for both halves of the payments endpoint, and the ``reason`` in
+    ``context`` is what tells them apart in the log. The learner-facing message
+    stays the same either way: a checkout that names which acquirer is
+    misconfigured, or a webhook that explains which signature check failed, is
+    a description of our system handed to whoever asked.
+
+    400 rather than 402: 402 is "you need to pay", which is what
+    InsufficientQuota means. This is "this payment cannot proceed".
+    """
+
+    code = "payment.refused"
+    http_status = 400
+
+
 class InsufficientQuota(AppError):
     """Daily attempt / task allowance or realtime seconds exhausted."""
 

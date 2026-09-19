@@ -21,6 +21,12 @@ from typing import Final
 
 from app.core.config import Settings
 from app.core.logging import configure_logging, get_logger
+from app.services.entitlements.pricing import (
+    BILLING_PERIODS,
+    PURCHASABLE_PLANS,
+    UnpricedError,
+    price_for,
+)
 from app.services.llm.registry import get_llm
 from app.services.payments.registry import build_payment_provider, provider_for_currency
 from app.services.provider_errors import ProviderConfigurationError
@@ -67,6 +73,7 @@ def collect_problems(settings: Settings) -> list[CapabilityProblem]:
         *_tts_problems(settings),
         *_llm_problems(settings),
         *_payment_problems(settings),
+        *_pricing_problems(settings),
     ]
 
 
@@ -169,6 +176,26 @@ def _payment_problems(settings: Settings) -> list[CapabilityProblem]:
             provider_for_currency(currency, settings=settings)
         except ProviderConfigurationError as exc:
             problems.append(CapabilityProblem("payments", currency, str(exc)))
+    return problems
+
+
+def _pricing_problems(settings: Settings) -> list[CapabilityProblem]:
+    """A currency we accept but have no price in is one nobody can pay in.
+
+    The symptom without this check is a learner reaching checkout and being
+    refused for a reason that is entirely ours — and only for the currency
+    nobody tested with.
+    """
+    problems = []
+    for currency in settings.supported_currencies:
+        for plan in PURCHASABLE_PLANS:
+            for period in BILLING_PERIODS:
+                try:
+                    price_for(plan, period, currency, settings=settings)
+                except (UnpricedError, ValueError) as exc:
+                    problems.append(
+                        CapabilityProblem("pricing", f"{plan} {period} in {currency}", str(exc))
+                    )
     return problems
 
 

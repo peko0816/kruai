@@ -138,6 +138,132 @@ def track(
     )
 
 
+# --------------------------------------------------------- starting a lesson
+
+
+async def start(
+    client: httpx.AsyncClient, lesson_id: uuid.UUID, *, headers: dict[str, str]
+) -> httpx.Response:
+    return await client.post(f"{LESSONS_URL}/{lesson_id}/start", headers=headers)
+
+
+async def test_starting_a_lesson_spends_one_of_the_day_s_tasks(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows, settings: Settings
+) -> None:
+    """PRD 4.3's Free allowance, enforced where it can still refuse something:
+    at the door rather than on the way out (D-054)."""
+    headers = await authenticated(client)
+
+    response = await start(client, seeded["lesson"], headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_start"] is True
+    assert body["remaining_tasks"] == settings.limit_free_daily_tasks - 1
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(1,)]
+    assert rows("SELECT status FROM lesson_progress") == [("started",)]
+
+
+async def test_picking_a_lesson_back_up_is_free(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
+) -> None:
+    """One lesson over three sittings is one lesson. Charging three times would
+    make the limit mean something nobody agreed to."""
+    headers = await authenticated(client)
+
+    await start(client, seeded["lesson"], headers=headers)
+    again = await start(client, seeded["lesson"], headers=headers)
+
+    assert again.json()["first_start"] is False
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(1,)]
+
+
+async def test_the_free_allowance_runs_out(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows, execute: Execute
+) -> None:
+    headers = await authenticated(client)
+    execute("UPDATE entitlements SET daily_tasks_used = 3")
+
+    response = await start(client, seeded["lesson"], headers=headers)
+
+    assert response.status_code == 402
+    assert response.json()["code"] == "quota.insufficient"
+
+
+async def test_a_refused_start_leaves_no_trace(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows, execute: Execute
+) -> None:
+    """Otherwise the learner comes back tomorrow to find the lesson already
+    marked started — and the task they were refused silently spent."""
+    headers = await authenticated(client)
+    execute("UPDATE entitlements SET daily_tasks_used = 3")
+
+    await start(client, seeded["lesson"], headers=headers)
+
+    assert rows("SELECT count(*) FROM lesson_progress") == [(0,)]
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(3,)]
+
+
+async def test_a_paid_plan_has_no_task_limit(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    user_id = await _user_id(client, settings)
+    execute(
+        "INSERT INTO subscriptions (user_id, plan, status, period_start, period_end) "
+        "VALUES (:u, 'basic', 'active', now(), now() + interval '30 days')",
+        u=user_id,
+    )
+    execute("UPDATE entitlements SET daily_tasks_used = 99")
+    headers = await authenticated(client)
+
+    response = await start(client, seeded["lesson"], headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["remaining_tasks"] is None
+
+
+async def test_a_new_day_gives_the_tasks_back(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows, execute: Execute
+) -> None:
+    headers = await authenticated(client)
+    execute("UPDATE entitlements SET daily_tasks_used = 3, reset_at = now() - interval '1 hour'")
+
+    response = await start(client, seeded["lesson"], headers=headers)
+
+    assert response.status_code == 200
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(1,)]
+
+
+async def test_starting_an_organisation_lesson_is_not_found(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
+) -> None:
+    headers = await authenticated(client)
+
+    response = await start(client, seeded["org_lesson"], headers=headers)
+
+    assert response.status_code == 404
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(0,)], "nothing was charged"
+
+
+async def test_completing_a_started_lesson_does_not_charge_again(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
+) -> None:
+    """A task is one lesson, counted once, at the start."""
+    headers = await authenticated(client)
+
+    await start(client, seeded["lesson"], headers=headers)
+    await complete(client, seeded["lesson"], headers=headers)
+
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(1,)]
+    assert rows("SELECT status FROM lesson_progress") == [("completed",)]
+
+
+async def test_starting_needs_a_token(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    assert (await start(client, seeded["lesson"], headers={})).status_code == 401
+
+
 # ----------------------------------------------------------------- completion
 
 

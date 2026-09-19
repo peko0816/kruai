@@ -238,6 +238,41 @@ async def test_a_voice_note_before_any_lesson_is_explained_not_scored(
     assert rows("SELECT count(*) FROM cost_ledger") == [(0,)], "nothing was sent to a scorer"
 
 
+async def test_opening_a_lesson_spends_a_task(
+    conversation: Conversation, unit: dict[str, uuid.UUID], rows: Rows
+) -> None:
+    """The bot goes through the paywall like any other client (D8a)."""
+    await conversation.on_learn(LEARNER)
+
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(1,)]
+    assert rows("SELECT status FROM lesson_progress") == [("started",)]
+
+
+async def test_a_learner_out_of_tasks_is_told_rather_than_shown_the_lesson(
+    conversation: Conversation, unit: dict[str, uuid.UUID], execute: Execute, rows: Rows
+) -> None:
+    """Refused at the door: nothing of the lesson is sent, and no attempt can
+    follow because there is no session."""
+    await conversation.on_status(LEARNER)  # provisions the account
+    execute("UPDATE entitlements SET daily_tasks_used = 3")
+
+    replies = await conversation.on_learn(LEARNER)
+
+    assert "allowance is used up" in replies[0].text
+    assert len(replies) == 1, "no part of the lesson was shown"
+    assert rows("SELECT count(*) FROM lesson_progress") == [(0,)]
+
+
+async def test_resuming_does_not_spend_another_task(
+    conversation: Conversation, unit: dict[str, uuid.UUID], rows: Rows
+) -> None:
+    await conversation.on_learn(LEARNER)
+    await conversation.on_voice(LEARNER, audio=AUDIO)
+    await conversation.on_learn(LEARNER)
+
+    assert rows("SELECT daily_tasks_used FROM entitlements") == [(1,)]
+
+
 # --------------------------------------------------------------- refusals
 
 

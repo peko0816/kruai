@@ -103,6 +103,14 @@
 | `SUBSCRIPTION_AUTO_CHARGE_RETRY_DAYS` | `1,3` | auto 模式：扣款失败的重试间隔（天，逗号分隔） |
 | `SUPPORTED_CURRENCIES` | `USD` | 逗号分隔，如 `USD,KHR` |
 | `DEFAULT_CURRENCY` | `USD` | |
+| `PRICE_BASIC_MONTHLY` | `USD:199` | PRD 4.3。`币种:最小单位整数`，可写多币种如 `USD:199,KHR:8000` |
+| `PRICE_BASIC_YEARLY` | `USD:1800` | |
+| `PRICE_PRO_MONTHLY` | `USD:599` | |
+| `PRICE_PRO_YEARLY` | `USD:5400` | |
+
+> 价格是**最小货币单位的整数**：199 = $1.99，8000 = ៛8000。KHR 没有小数位，
+> 所以这里永远不会出现「分」。`SUPPORTED_CURRENCIES` 里列了却没定价的币种，
+> 启动自检会拒绝启动——收得了钱却报不出价，是一种没人会立刻发现的错。
 
 ## 6. 媒体与回退
 

@@ -36,7 +36,7 @@ from app.core.logging import get_logger
 from app.models.content import Course, Lesson, LessonItem, MediaAsset
 from app.models.learning import ConceptMastery, LessonProgress
 from app.models.users import UserProfile
-from app.services.entitlements import current_plan
+from app.services.entitlements import Entitlements, QuotaReset, current_plan
 from app.services.experiments import EXPLAIN_MEDIA, Experiments
 from app.services.mastery import INITIAL_INTERVAL_DAYS, initial_ease_factor
 from app.services.media import MediaCandidate, ResolvedMedia, ViewerContext, resolve
@@ -85,6 +85,17 @@ class LessonDetailOut(BaseModel):
     title_km: str
     concept_ids: list[uuid.UUID]
     items: list[LessonItemOut]
+
+
+class LessonStartOut(BaseModel):
+    """The learner has begun this lesson, and it cost them a task."""
+
+    lesson_id: uuid.UUID
+    status: str
+    #: False when they had already started it — resuming is free.
+    first_start: bool
+    #: Tasks left today; None when the plan has no daily cap.
+    remaining_tasks: int | None
 
 
 class LessonCompletionOut(BaseModel):
@@ -392,3 +403,101 @@ async def _schedule_untouched_concepts(
         .returning(ConceptMastery.concept_id)
     )
     return len((await session.execute(statement)).scalars().all())
+
+
+# ------------------------------------------------------------------- starting
+
+
+@router.post("/{lesson_id}/start", status_code=status.HTTP_200_OK)
+async def start_lesson(
+    lesson_id: uuid.UUID,
+    session: SessionDep,
+    session_factory: SessionFactoryDep,
+    settings: SettingsDep,
+    user_id: CurrentUserDep,
+) -> LessonStartOut:
+    """Begin a lesson, spending one of the day's tasks.
+
+    **This is where the Free tier's task allowance is enforced** (PRD 4.3, three
+    a day), and it is enforced here rather than at completion for one reason: a
+    learner refused after finishing a lesson has already done the work, so the
+    refusal protects nothing and costs them everything. A paywall has to be a
+    door, not a bill.
+
+    What counts as a task is one completed lesson (docs/DECISIONS.md D-043), so
+    the allowance is spent on the *first* start of each lesson. Picking one back
+    up is free: a learner who does one lesson over three sittings has done one
+    lesson, and charging them three times would make the limit mean something
+    nobody agreed to.
+
+    Raises:
+        ContentNotFound: no such lesson, or one behind an organisation course.
+        InsufficientQuota: the day's tasks are spent (402).
+    """
+    now = datetime.datetime.now(datetime.UTC)
+    await _load_lesson(session, lesson_id)
+
+    started = await _mark_started(session, user_id=user_id, lesson_id=lesson_id)
+    if not started:
+        await session.commit()
+        return LessonStartOut(
+            lesson_id=lesson_id,
+            status="started",
+            first_start=False,
+            remaining_tasks=None,
+        )
+
+    plan = await current_plan(session, user_id)
+    timezone = await _timezone_of(session, user_id)
+    if timezone is not None:
+        reset = QuotaReset(session_factory=session_factory, settings=settings)
+        await reset.reset_if_due(user_id, timezone=timezone, now=now)
+
+    entitlements = Entitlements(session_factory=session_factory, settings=settings)
+    try:
+        consumption = await entitlements.consume_task(user_id, plan=plan)
+    except Exception:
+        # The row was inserted in this transaction and the allowance said no, so
+        # the start never happened. Rolling back is what keeps a refused learner
+        # from finding the lesson already marked started when they come back.
+        await session.rollback()
+        raise
+
+    await session.commit()
+    log.info(
+        "lesson.started",
+        user_id=str(user_id),
+        lesson_id=str(lesson_id),
+        plan=plan,
+        remaining_tasks=consumption.remaining,
+    )
+    return LessonStartOut(
+        lesson_id=lesson_id,
+        status="started",
+        first_start=True,
+        remaining_tasks=consumption.remaining,
+    )
+
+
+async def _mark_started(session: AsyncSession, *, user_id: uuid.UUID, lesson_id: uuid.UUID) -> bool:
+    """Record the start. True when this call was the first one.
+
+    DO NOTHING rather than DO UPDATE: a lesson already started — or already
+    completed — must not be reopened, because either would charge a second task
+    for work the learner has already paid for.
+    """
+    statement = (
+        pg_insert(LessonProgress)
+        .values(user_id=user_id, lesson_id=lesson_id, status="started")
+        .on_conflict_do_nothing(index_elements=["user_id", "lesson_id"])
+        .returning(LessonProgress.lesson_id)
+    )
+    return (await session.execute(statement)).scalar_one_or_none() is not None
+
+
+async def _timezone_of(session: AsyncSession, user_id: uuid.UUID) -> str | None:
+    stored = await session.execute(
+        sa.select(UserProfile.timezone).where(UserProfile.user_id == user_id)
+    )
+    timezone: str | None = stored.scalar_one_or_none()
+    return timezone

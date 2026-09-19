@@ -118,8 +118,21 @@ def test_the_shipped_default_configuration_is_coherent() -> None:
     check_provider_configuration(settings())
 
 
+#: Riel prices for every purchasable combination. The tests below enable KHR to
+#: exercise channel coverage, and D8a's pricing check would otherwise report
+#: four unpriced combinations on top of whatever they are actually testing.
+PRICED_IN_RIEL: dict[str, str] = {
+    "PRICE_BASIC_MONTHLY": "USD:199,KHR:8000",
+    "PRICE_BASIC_YEARLY": "USD:1800,KHR:72000",
+    "PRICE_PRO_MONTHLY": "USD:599,KHR:24000",
+    "PRICE_PRO_YEARLY": "USD:5400,KHR:216000",
+}
+
+
 def test_multiple_payment_channels_stay_coherent() -> None:
-    configured = settings(PAYMENT_PROVIDERS="fake,fake_manual", SUPPORTED_CURRENCIES="USD,KHR")
+    configured = settings(
+        PAYMENT_PROVIDERS="fake,fake_manual", SUPPORTED_CURRENCIES="USD,KHR", **PRICED_IN_RIEL
+    )
     assert collect_problems(configured) == []
 
 
@@ -185,7 +198,7 @@ def test_no_enabled_channel_is_a_problem() -> None:
 def test_a_currency_no_channel_settles_is_caught() -> None:
     """fake_manual takes USD only, so enabling KHR alongside it is incoherent."""
     problems = collect_problems(
-        settings(PAYMENT_PROVIDERS="fake_manual", SUPPORTED_CURRENCIES="USD,KHR")
+        settings(PAYMENT_PROVIDERS="fake_manual", SUPPORTED_CURRENCIES="USD,KHR", **PRICED_IN_RIEL)
     )
     assert [problem.requirement for problem in problems] == ["KHR"]
 
@@ -193,8 +206,31 @@ def test_a_currency_no_channel_settles_is_caught() -> None:
 def test_a_bad_channel_name_suppresses_the_currency_report() -> None:
     """Reporting KHR as uncovered while a channel is unbuildable points at the
     wrong fix; the name is the cause."""
-    problems = collect_problems(settings(PAYMENT_PROVIDERS="typo", SUPPORTED_CURRENCIES="USD,KHR"))
+    problems = collect_problems(
+        settings(PAYMENT_PROVIDERS="typo", SUPPORTED_CURRENCIES="USD,KHR", **PRICED_IN_RIEL)
+    )
     assert [problem.requirement for problem in problems] == ["typo"]
+
+
+def test_a_currency_with_no_price_refuses_to_boot() -> None:
+    """A currency we accept but cannot price is one nobody can pay in.
+
+    The symptom without this is a learner reaching checkout and being refused
+    for a reason that is entirely ours — in the one currency nobody tested.
+    """
+    problems = collect_problems(settings(SUPPORTED_CURRENCIES="USD,KHR"))
+
+    assert [problem.adapter for problem in problems] == ["pricing"] * 4
+    assert {problem.requirement for problem in problems} == {
+        "basic monthly in KHR",
+        "basic yearly in KHR",
+        "pro monthly in KHR",
+        "pro yearly in KHR",
+    }
+
+
+def test_a_priced_currency_passes() -> None:
+    assert collect_problems(settings(SUPPORTED_CURRENCIES="USD,KHR", **PRICED_IN_RIEL)) == []
 
 
 def test_a_test_provider_in_production_fails_the_boot() -> None:

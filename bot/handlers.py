@@ -111,6 +111,9 @@ class Conversation:
             lesson_id = await self._api.first_lesson_id(token)
             if lesson_id is None:
                 return _render([Reply("bot.no_content")], learner.locale)
+            # Starting is what costs a task (PRD 4.3), so a learner who is out
+            # of them is refused here, before any of the lesson is shown.
+            await self._api.start_lesson(token, lesson_id)
             lesson = await self._api.lesson(token, lesson_id)
             return await self._play(learner, lesson, start(lesson), token)
         except ApiError as exc:
