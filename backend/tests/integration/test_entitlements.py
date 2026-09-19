@@ -29,6 +29,7 @@ from app.core.errors import InsufficientQuota
 from app.models.commerce import Entitlement
 from app.models.users import User
 from app.services.entitlements import Entitlements, EntitlementsMissingError
+from tests.integration.conftest import TEST_DB_MAX_OVERFLOW, TEST_DB_POOL_SIZE
 
 pytestmark = pytest.mark.integration
 
@@ -36,6 +37,10 @@ pytestmark = pytest.mark.integration
 def settings_for(url: URL, **overrides: str) -> Settings:
     values: dict[str, Any] = {
         "DATABASE_URL": url.render_as_string(hide_password=False),
+        # Small, like the rest of the suite: four workers share one
+        # PostgreSQL's hundred connections (tests/integration/conftest.py).
+        "DB_POOL_SIZE": TEST_DB_POOL_SIZE,
+        "DB_MAX_OVERFLOW": TEST_DB_MAX_OVERFLOW,
         "REDIS_URL": "redis://localhost:6379/0",
         "TELEGRAM_BOT_TOKEN": "",
         "AZURE_SPEECH_KEY": "",

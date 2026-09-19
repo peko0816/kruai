@@ -37,6 +37,11 @@ dev = [
     "mypy>=1.11",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    # The integration suite is bound by round trips to PostgreSQL, not by CPU,
+    # so it parallelises almost perfectly. Each worker is its own process and
+    # therefore builds its own scratch database and takes its own Redis
+    # logical database (tests/integration/conftest.py).
+    "pytest-xdist>=3.6",
     # Test-only. FakeLLM claims its output satisfies the caller's json_schema;
     # this checks that claim against a real validator instead of against our own
     # reading of the spec. Never imported by app code.
