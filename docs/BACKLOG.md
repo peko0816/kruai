@@ -10,14 +10,14 @@
 | B Provider 抽象与 Fake | 6 | 6 | G-B 通过 |
 | C 领域层 | 7 | 7 | G-C 通过 |
 | D API 与 Bot | 12 | 10 | D9 等 M0-3，D11 等产品决策 |
-| **E 内容管线** | **9** | **0** | **下一个要做的。E1–E7 不被任何东西阻塞** |
+| **E 内容管线** | **9** | **1** | **在做。E1–E7 不被任何东西阻塞；下一个是 E2** |
 | F M3 实时语音 | 6 | 0 | G-D 之后 |
 | G M4 B 端 | 5 | 0 | G-D 之后 |
 
-**全项目 28 / 50。到 M2（C 端可交付测试）28 / 39。**
+**全项目 29 / 50。到 M2（C 端可交付测试）29 / 39。**
 
 挡在 M2 前面的只剩三样：**阶段 E 的内容**（现在就能做）、
-**ABA 凭据**（M0-3）、**km/zh 文案**。`pipeline/` 目前只有 README。
+**ABA 凭据**（M0-3）、**km/zh 文案**。`pipeline/` 现在有 seed schema 与校验器，还没有内容。
 
 标记：
 - `[BLOCKED-M0]` —— 只实现接口与 Fake，真实实现留 `# TODO(M0-x)`
@@ -118,7 +118,7 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 
 | # | 状态 | 任务 | 依赖 | 验收 |
 |---|---|---|---|---|
-| E1 | — | seed YAML schema 定义 + 校验器；`pipeline/seed/zh-hsk3.0/` 目录结构 | A1 | 非法 seed 被拒并指出具体字段 |
+| E1 | ✅ #PRNUM | seed YAML schema 定义 + 校验器；`pipeline/seed/zh-hsk3.0/` 目录结构 | A1 | 非法 seed 被拒并指出具体字段 |
 | E2 | — | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
 | E3 | — | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
 | E4 | — | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
@@ -128,9 +128,15 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
 
-`[GATE]` **G-E / M1** — 未开始：对照 M1 验收清单。
+`[GATE]` **G-E / M1** ◐ 进行中：对照 M1 验收清单。
 注意 E1–E7 做完也不等于 M1 通过——清单里还要母语者 10% 抽检、
 以及真实 TTS 生成的音频上传对象存储（E8，被 M0-2 阻塞）。
+
+> E1 落地说明：seed 格式与校验器在 `pipeline/seed_schema.py`，R7 来源白名单在
+> `pipeline/seed_sources.py`，命令是 `make seed` / `make seed-strict`。
+> 四条决策见 DECISIONS 的 D-077（文件自带来源）、D-078（白名单是代码，
+> 教材标题扫描只是第二道弱网）、D-079（高棉语解释可留占位，strict 是 M1 闸门）、
+> D-080（HSKK 任务类型封闭枚举，六个值待 M1 内容 review 确认一次）。
 
 ---
 

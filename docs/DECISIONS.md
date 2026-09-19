@@ -1837,6 +1837,76 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 
 ---
 
+## D-077 seed 文件自带来源；一个文件 = 一个等级的一组 concept
+
+- 日期：2026-09-19
+- 背景：PRD 6.1 只说 seed 是 `seed/{zh-hsk3.0,...}/*.yaml`，没定义文件内部长什么样，
+  也没说来源信息（PRD 5.5 要求的 `sources[]` / `licence`）记在哪一层。
+- 选择：`schema_version` + `meta` + `concepts` 三段。`meta` 里带 `language` /
+  `level` / `licence` / `sources[]`，**每个文件自带**，不做目录级清单。
+  文件按等级命名（`hsk1.yaml`），文件内每个 concept 的 slug 必须是
+  `{language}.{level}.{name}`，与 `meta` 对不上就拒绝。
+- 备选与放弃原因：目录级 `_sources.yaml` 少写几行重复，但 seed 文件是被复制、
+  被移动、被单独 review 的单位——来源放在隔壁文件，迟早会和它描述的内容分家。
+  R7 是硬约束，为省几行重复而让来源可以走失，不划算。
+- 回退成本：低。现在 `pipeline/seed/` 是空的，改格式只需改 `seed_schema.py`
+  与还未写出的 seed 文件；`schema_version` 就是为了让不兼容的第二版能共存。
+- 影响范围：`pipeline/seed_schema.py`、`pipeline/seed/README.md`。
+
+## D-078 来源白名单是代码，不是配置；教材标题扫描只是第二道弱网
+
+- 日期：2026-09-19
+- 背景：R7 / PRD 5.5 规定了能用与不能用的来源，但那是一段散文。E 阶段是唯一
+  真正会碰到教材的阶段（E2 录骨架、E3 用 LLM 生成），需要一个能跑的判据。
+- 选择：把 PRD 第 5 节的来源逐条枚举进 `pipeline/seed_sources.py`，seed 文件
+  按 id 引用，**不在表里的 id 一律拒绝**。CC-BY 系许可的来源必须写 `attribution`，
+  否则拒绝——署名要随 pack 进产品「关于」页，seed 阶段没人写就永远不会有。
+  另加一个出版社教材标题扫描，覆盖全文件所有字符串。
+- 备选与放弃原因：做成配置（`ALLOWED_SEED_SOURCES` 环境变量）意味着可以不经
+  review 放宽版权边界，方向反了。CONFIG_REFERENCE 判据是「会不会因线上数据而变」，
+  版权边界不会。
+- **这条决策的边界要说清楚**：标题扫描拦得住的是**诚实的失误**——引的来源合法，
+  顺手在 `detail` 里写了「改写自《XX教程》第 3 课」。它拦不住存心的人，
+  也拦不住不写来源的洗稿。真正的防线是白名单 + 人工 review，扫描只是补一层。
+  把它当成 R7 的充分保证是危险的误读。
+- 回退成本：低。加一个来源是一个 PR 改一处数组。
+- 影响范围：`pipeline/seed_sources.py`、`pipeline/seed_schema.py`。
+
+## D-079 高棉语解释可留 `[[km:...]]` 占位，`--strict` 是 M1 闸门
+
+- 日期：2026-09-19
+- 背景：`concepts.km_explanation` 是要进库、要给学习者看的高棉语教学文案。
+  E2 要录 HSK1 全部骨架，但高棉语必须由母语者写（PRD 15.3、CLAUDE.md 第 6 节
+  「对外可见的必须停下来问」）。若校验器要求必须是高棉语，E2 无法在没有母语者
+  的情况下推进；若允许写英文，英文会静默进库。
+- 选择：沿用 D-050 的做法，允许 `[[km:<key>]]` 占位，**但不允许英文**——
+  校验规则是「含高棉文字符（U+1780-U+17FF）或是显式占位符」。
+  `make seed` 报数不阻断（PR 闸门只管结构），`make seed-strict` 拒绝占位符，
+  作为 M1 验收闸门，与 `make i18n` / `make i18n-strict` 完全同构（D-051）。
+- 注意规则是「含高棉文」而不是「不含汉字」：一条好的高棉语解释很可能会引用它在
+  解释的中文句型（`「我要」 ...`），禁汉字会把写得最清楚的那些拒掉。要拦的是
+  「整条用别的语言写」，那种情况一个高棉文字符都不会有。
+- 回退成本：低。收紧成「必须是高棉文」只是删掉占位符分支。
+- 影响范围：`pipeline/seed_schema.py`、`pipeline/validate_seed.py`、`Makefile`。
+
+## D-080 HSKK 任务类型是封闭枚举，写死六个值
+
+- 日期：2026-09-19
+- 背景：`concepts.hskk_task_types` 在 DDL 里是 `TEXT[]`，PRD 5.1 说 HSKK 大纲是
+  「这一轮算不算过了」的权威依据，但没有列出取值。
+- 选择：按 HSKK 三级的题型枚举六个值——`listen_and_repeat`(听后重复)、
+  `listen_and_answer`(听后回答)、`answer_questions`(回答问题)、
+  `describe_picture`(看图说话)、`listen_and_retell`(听后复述)、`read_aloud`(朗读)。
+  zh 的 concept 必须非空（PRD 6.2），非 zh 的必须为空（HSKK 只考中文）。
+- 备选与放弃原因：留成自由字符串，则一个拼写错误会静默变成第七种任务类型，
+  而这个字段存在的全部意义就是把 concept 绑到外部标准上，绑错了不如不绑。
+- 回退成本：低，但**这六个值是按大纲写的，没有经过考试院文件逐条核对**。
+  M1 内容 review 时请母语者/教学顾问确认一次；发现出入就改这个 Literal 并
+  同步 `pipeline/seed/README.md` 的对照表。
+- 影响范围：`pipeline/seed_schema.py`、`pipeline/seed/README.md`。
+
+---
+
 # 遗留约束
 
 **这些不是决策，是已知的、尚未处理的约束。** 每一条都在未来某个具体任务上生效，

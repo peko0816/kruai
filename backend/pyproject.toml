@@ -29,6 +29,10 @@ dependencies = [
     # POST /attempts is a file upload. Without it FastAPI raises at import of
     # the route, not at request time.
     "python-multipart>=0.0.9",
+    # Seed files are YAML, hand-written (BACKLOG E1). A pipeline dependency,
+    # not an API one, but the pipeline shares this venv the way bot/ shares it
+    # rather than carrying a second lockfile that nobody would update.
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
@@ -47,6 +51,7 @@ dev = [
     # reading of the spec. Never imported by app code.
     "jsonschema>=4.23",
     "types-jsonschema>=4.23",
+    "types-pyyaml>=6.0",
 ]
 
 [build-system]
@@ -128,7 +133,7 @@ plugins = ["pydantic.mypy"]
 # separate process that talks to the API over HTTP (ARCHITECTURE section 1).
 # It shares this toolchain rather than carrying a second one, because two
 # ruff/mypy/pytest configurations drift and only one of them gets updated.
-files = ["app", "tests", "../bot"]
+files = ["app", "tests", "../bot", "../pipeline"]
 mypy_path = ".."
 exclude = ["alembic/versions"]
 
@@ -140,8 +145,9 @@ ignore_missing_imports = true
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
-testpaths = ["tests", "../bot/tests"]
-# The bot imports as a top-level `bot` package from the repository root.
+testpaths = ["tests", "../bot/tests", "../pipeline/tests"]
+# The bot and the pipeline import as top-level packages from the repository
+# root. Neither is part of this distribution; both share this toolchain.
 pythonpath = [".."]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
