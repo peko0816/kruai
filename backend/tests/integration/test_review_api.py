@@ -814,3 +814,31 @@ def test_the_query_parameter_offers_exactly_the_domain_choices() -> None:
     """The enum restates REVIEW_DURATION_CHOICES; this keeps them equal."""
     assert {member.value for member in ReviewMinutes} == set(REVIEW_DURATION_CHOICES)
     assert DEFAULT_REVIEW_MINUTES.value in REVIEW_DURATION_CHOICES
+
+
+async def test_the_queue_survives_a_restart(
+    client: httpx.AsyncClient,
+    seeded: dict[str, uuid.UUID],
+    execute: Execute,
+    settings: Settings,
+) -> None:
+    """M2 acceptance: mastery and the queue do not live in a process.
+
+    A second application is booted against the same database -- lifespan,
+    engine, pool and all -- which is what a restart is. Everything the first
+    one learned has to be readable by the second, because the alternative
+    (an in-process cache that quietly became the source of truth) looks
+    identical until the day somebody deploys.
+    """
+    token = await token_for(client)
+    headers = auth_header(token)
+    await complete(client, seeded["lesson"], headers=headers)
+    execute("UPDATE concept_mastery SET next_due_at = now() - interval '1 minute'")
+
+    before = (await client.get(QUEUE_URL, headers=headers)).json()
+
+    async with client_for(settings) as restarted:
+        after = (await restarted.get(QUEUE_URL, headers=headers)).json()
+
+    assert len(before["entries"]) == 3
+    assert after == before

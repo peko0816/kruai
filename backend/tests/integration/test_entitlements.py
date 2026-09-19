@@ -521,3 +521,45 @@ async def test_a_snapshot_of_a_missing_row_says_so(engine: AsyncEngine, migrated
     with pytest.raises(EntitlementsMissingError):
         await quota.snapshot(uuid.uuid4())
     await engine.dispose()
+
+
+# --------------------------------------------------- a deduction on loan
+
+
+async def test_a_borrowed_deduction_is_undone_when_the_caller_rolls_back(
+    engine: AsyncEngine, migrated_db: URL
+) -> None:
+    """The contract behind the ``session`` argument (D-073).
+
+    Starting a lesson marks a row and spends a task, and those two have to
+    stand or fall together. They only can if the deduction leaves the
+    transaction alone: a commit inside the service would make the spend
+    survive a caller that decided to undo everything, and the learner would be
+    one task poorer with nothing to show for it.
+    """
+    quota = service(engine, migrated_db, LIMIT_FREE_DAILY_TASKS="3")
+    user_id = await provision(engine)
+    factory = create_session_factory(engine)
+
+    async with factory() as session:
+        consumption = await quota.consume_task(user_id, plan="free", session=session)
+        assert consumption.remaining == 2
+        await session.rollback()
+
+    assert (await stored(engine, user_id)).daily_tasks_used == 0
+    await engine.dispose()
+
+
+async def test_a_borrowed_deduction_stands_when_the_caller_commits(
+    engine: AsyncEngine, migrated_db: URL
+) -> None:
+    quota = service(engine, migrated_db, LIMIT_FREE_DAILY_TASKS="3")
+    user_id = await provision(engine)
+    factory = create_session_factory(engine)
+
+    async with factory() as session:
+        await quota.consume_task(user_id, plan="free", session=session)
+        await session.commit()
+
+    assert (await stored(engine, user_id)).daily_tasks_used == 1
+    await engine.dispose()

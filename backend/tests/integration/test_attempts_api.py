@@ -15,6 +15,7 @@ file means a fixed score: a number that moves here is the code moving.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import uuid
@@ -708,3 +709,67 @@ async def test_two_learners_keep_separate_mastery(
     await attempt(client, seeded["drill"], headers=two)
 
     assert rows("SELECT attempt_count FROM concept_mastery ORDER BY attempt_count") == [(1,), (2,)]
+
+
+# --------------------------------------------------------------- under load
+
+
+async def test_the_allowance_holds_when_the_requests_arrive_together(
+    client: httpx.AsyncClient,
+    seeded: dict[str, uuid.UUID],
+    rows: Rows,
+    settings: Settings,
+) -> None:
+    """Fifteen recordings at once against an allowance of ten (M2 acceptance).
+
+    Read-modify-write would hand out more than ten here, and consistently:
+    every request reads the same used-count before any of them has written.
+    The deduction is a conditional UPDATE instead, so the database decides.
+    """
+    headers = await authenticated(client)
+    limit = settings.limit_free_daily_attempts
+
+    responses = await asyncio.gather(
+        *(attempt(client, seeded["drill"], headers=headers) for _ in range(limit + 5))
+    )
+
+    granted = [r for r in responses if r.status_code == 201]
+    refused = [r for r in responses if r.status_code == 402]
+    assert len(granted) == limit
+    assert len(refused) == 5
+    assert rows("SELECT daily_attempts_used FROM entitlements") == [(limit,)]
+    assert rows("SELECT count(*) FROM attempts") == [(limit,)]
+    assert rows("SELECT count(*) FROM cost_ledger") == [(limit,)]
+
+
+async def test_more_recordings_at_once_than_the_pool_has_connections(
+    client: httpx.AsyncClient,
+    seeded: dict[str, uuid.UUID],
+    rows: Rows,
+    execute: Execute,
+    settings: Settings,
+) -> None:
+    """The attempt path, at pool capacity (D-073).
+
+    Its own test rather than a row in test_pool_pressure.py, because this is
+    the endpoint the whole cliff was found on and the only one that reaches for
+    a second connection three separate times: the daily reset, the allowance,
+    and the cost ledger. See that module for what the failure looks like.
+    """
+    user_id = await sign_in(client, settings)
+    execute(
+        "INSERT INTO subscriptions (user_id, plan, status, period_start, period_end) "
+        "VALUES (:u, 'basic', 'active', now(), now() + interval '30 days')",
+        u=user_id,
+    )
+    headers = await authenticated(client)
+    at_once = settings.db_pool_size + settings.db_max_overflow + 1
+
+    responses = await asyncio.gather(
+        *(attempt(client, seeded["drill"], headers=headers) for _ in range(at_once)),
+        return_exceptions=True,
+    )
+
+    codes = [r.status_code if isinstance(r, httpx.Response) else repr(r) for r in responses]
+    assert codes == [201] * at_once
+    assert rows("SELECT count(*) FROM attempts") == [(at_once,)]

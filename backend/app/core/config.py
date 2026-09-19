@@ -90,6 +90,18 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
 
+    #: How many database connections one process may hold. Not a tuning knob
+    #: that can be left to a library default: a request that needs a second
+    #: connection while holding its first turns the pool size into a hard
+    #: concurrency cliff, and the cliff has to be a number somebody chose
+    #: (D-073). ``db_max_overflow`` is the burst above the steady pool.
+    db_pool_size: int = Field(default=20, gt=0)
+    db_max_overflow: int = Field(default=10, ge=0)
+    #: How long a request waits for a connection before giving up. Short on
+    #: purpose: a learner would rather be told to try again than watch a voice
+    #: note upload hang for half a minute.
+    db_pool_timeout_seconds: int = Field(default=10, gt=0)
+
     #: Optional until the content pipeline uploads real media. Making these
     #: required would break the all-fake configuration that gate G-B depends on
     #: (docs/DECISIONS.md D-002).

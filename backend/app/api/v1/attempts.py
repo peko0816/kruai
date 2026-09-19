@@ -226,9 +226,20 @@ async def create_attempt(
 
     plan = await current_plan(session, user_id)
     await _guard_cost(session, user_id=user_id, plan=plan, settings=settings, now=now)
+    timezone = await _timezone_of(session, user_id)
+
+    # Every read above is done. Hand the connection back before anything that
+    # opens a session of its own, or this request holds two at once and a
+    # poolful of requests deadlock waiting on each other (D-073).
+    await session.commit()
+
     entitlements = Entitlements(session_factory=session_factory, settings=settings)
     await _reset_quota_if_due(
-        session, session_factory=session_factory, settings=settings, user_id=user_id, now=now
+        session_factory=session_factory,
+        settings=settings,
+        user_id=user_id,
+        timezone=timezone,
+        now=now,
     )
     consumption = await entitlements.consume_attempt(user_id, plan=plan)
 
@@ -410,12 +421,23 @@ async def _read_audio(audio: UploadFile, *, settings: Settings) -> bytes:
     return b"".join(chunks)
 
 
+async def _timezone_of(session: AsyncSession, user_id: uuid.UUID) -> str | None:
+    """The learner's own timezone, or None when they have no profile row.
+
+    Read here, on the request's own session, rather than inside the reset:
+    everything that reads goes before the connection is handed back (D-073).
+    """
+    return (
+        await session.execute(sa.select(UserProfile.timezone).where(UserProfile.user_id == user_id))
+    ).scalar_one_or_none()
+
+
 async def _reset_quota_if_due(
-    session: AsyncSession,
     *,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     user_id: uuid.UUID,
+    timezone: str | None,
     now: datetime.datetime,
 ) -> None:
     """Roll the daily counters over if the learner's local day has turned.
@@ -424,9 +446,6 @@ async def _reset_quota_if_due(
     on a worker running is a reset that silently does not happen, and the
     guarded UPDATE in reset.py is already safe to call on every request.
     """
-    timezone = (
-        await session.execute(sa.select(UserProfile.timezone).where(UserProfile.user_id == user_id))
-    ).scalar_one_or_none()
     if timezone is None:
         return
     reset = QuotaReset(session_factory=session_factory, settings=settings)
