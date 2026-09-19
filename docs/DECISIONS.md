@@ -1969,6 +1969,67 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 回退成本：低，改 seed 与那条断言。
 - 影响范围：`pipeline/seed/zh-hsk3.0/hsk1.yaml`、`pipeline/tests/test_seed_hsk1.py`。
 
+## D-084 生成成本先记在 draft 里，由 `import_pack.py` 写进 `cost_ledger`
+
+- 日期：2026-09-19
+- 背景：CLAUDE.md 第 8 节要求每一次外部 API 调用都写 `cost_ledger`，PRD 11.3 要求
+  内容生产成本记在 `ref='content_production'`。但 `generate.py` 是离线 CLI，
+  ARCHITECTURE 2.3 说管线不进请求链路，也不该在开发者笔记本上开生产库连接。
+- 选择：`generate.py` 把 provider 报回来的用量（calls / input / output /
+  cached_input / cost_usd_cents）汇总写进 draft 的 `usage` 字段；
+  **E7 的 `import_pack.py` 是唯一有数据库连接的阶段，由它把 usage 变成
+  `cost_ledger` 的一行，`ref='content_production'`、`user_id` 为空。**
+- 备选与放弃原因：让 `generate.py` 直接连库记账，等于要求每次生成都能访问生产数据库，
+  且一次失败的生成会留下无法对账的半条记录。反过来，完全不记账违反第 8 节。
+- **未落地的部分**：E7 尚未实现，所以现在这条链是断的——draft 里有数字，
+  `cost_ledger` 里没有行。在 E7 落地前，任何真实 provider 的生成都属于"没记账的调用"。
+  这也是 D-085 存在的另一个理由：在记账链打通前，花钱这件事必须显式确认。
+- 回退成本：低。若将来要让 generate 直接记账，加一个 `--ledger` 开关即可。
+- 影响范围：`pipeline/draft.py` 的 `Usage`、`pipeline/generate.py`、未来的 E7。
+
+## D-085 非 fake 的 LLM provider 必须带 `--confirm-spend` 才肯跑
+
+- 日期：2026-09-19
+- 背景：CLAUDE.md 第 6 节把"花钱的"列为必须停下来问的四类之一。而
+  `make generate` 花不花钱，只取决于 `.env` 里 `LLM_PROVIDER` 那一行——
+  一个没人会在敲命令前重读的值。HSK1 一次全量生成是 48 次计费调用。
+- 选择：`generate.py` 启动时检查 provider；不是 `fake` 且没有 `--confirm-spend`
+  就以退出码 2 拒绝，并在提示里指向 PRD 11.3 的成本归属。
+- 备选与放弃原因：只在文档里写"注意会花钱"——文档拦不住手指。
+  交互式确认（y/n）在 CI 与脚本里会挂住。
+- 回退成本：低，删一个判断。
+- 影响范围：`pipeline/generate.py`、`Makefile` 的 `generate` 目标。
+
+## D-086 管线可以 import 适配层，不可以 import 领域层
+
+- 日期：2026-09-19
+- 背景：ARCHITECTURE 有两处措辞冲突。第 2.3 节的数据流图明写
+  `generate.py → llm.batch_complete(...)`、`build_pack.py → tts.synthesize`；
+  但同节末尾又写"管线不 import backend 的任何 service，只共享 models/ 的 schema 定义"。
+  `services/llm/` 恰恰是一个 service 目录。
+- 选择：取数据流图那一条，并把规则说准确——**管线可以经 `base.py` 抽象使用适配层
+  （scoring / tts / payments / llm）与 `core/`（配置），不得 import 领域层
+  （mastery / media / entitlements / experiments）或 `api/`。**
+  理由：适配层就是"对外部能力的调用方式"，管线本来就要调外部能力；
+  领域层是运行时的业务判断，管线碰它才会产生真正的耦合。
+- 备选与放弃原因：让管线自带一套 LLM 调用代码，会直接违反 R2（不得绕过 provider 抽象），
+  也会让 `LLM_PROVIDER=fake` 的端到端验收在管线这一段失效。
+- 回退成本：低。
+- 影响范围：`pipeline/generate.py` 的 import；ARCHITECTURE 那句话建议在下次修订时改写。
+
+## D-087 拼音统一用带调符号（nǐ hǎo），不用数字调
+
+- 日期：2026-09-19
+- 背景：PRD 6.2 要求 `validate.py` 用 `pypinyin` 生成拼音与 LLM 输出比对，
+  不一致则拒绝。比对的前提是两边用同一种记法，而 PRD 没写是哪一种。
+- 选择：带调符号（`pypinyin` 的 `Style.TONE`）。生成提示里明确要求，
+  E4 比对时用同一 style。
+- 理由：带调符号是学习者实际会看到的形式；数字调只在工程里方便。
+  既然这串拼音会直接出现在教学卡片上，就让存下来的那一份等于展示的那一份，
+  少一次转换也就少一个出错的地方。
+- 回退成本：低，但**要在 E4 落地前定**——两边记法不一致会让校验规则全量误报。
+- 影响范围：`pipeline/generate.py` 的 SYSTEM_PROMPT 与 schema 描述、未来的 E4。
+
 ---
 
 # 遗留约束
