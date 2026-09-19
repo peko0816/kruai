@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import attempts, auth, courses, lessons
+from app.api.v1 import attempts, auth, courses, lessons, review
 
 #: Mounted by app.main at /api/v1. Routers are collected here rather than in
 #: main so that adding an endpoint group touches one file.
@@ -11,5 +11,6 @@ router.include_router(auth.router)
 router.include_router(courses.router)
 router.include_router(lessons.router)
 router.include_router(attempts.router)
+router.include_router(review.router)
 
 __all__ = ["router"]

@@ -151,6 +151,11 @@ class Settings(BaseSettings):
     realtime_context_summarize_after_turns: int = Field(default=8, gt=0)
     #: Hour in the user's own timezone at which daily counters reset.
     quota_reset_hour_local: int = Field(default=0, ge=0, le=23)
+    #: How long one concept's review is assumed to take when filling a slot.
+    #: A flat figure for now (services/mastery/review.py says the caller
+    #: supplies it); it becomes a real per-concept estimate by changing this
+    #: call site, not that module.
+    review_estimated_seconds_per_concept: int = Field(default=60, gt=0)
     #: [$] Ceiling on one uploaded recording. A Telegram voice note of the
     #: length a drill asks for is tens of kilobytes; this is generous for that
     #: and still refuses the upload that would be read into memory and then
