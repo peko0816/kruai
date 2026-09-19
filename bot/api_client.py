@@ -165,6 +165,13 @@ class KruaiApi:
         body: dict[str, Any] = _unwrap(response)
         return body
 
+    async def start_lesson(self, token: str, lesson_id: uuid.UUID) -> dict[str, Any]:
+        """Begin a lesson. Raises ApiError with quota.insufficient when the
+        day's tasks are spent — the bot turns that into a sentence, it does not
+        decide it."""
+        body: dict[str, Any] = await self._post(f"/api/v1/lessons/{lesson_id}/start", token=token)
+        return body
+
     async def complete_lesson(self, token: str, lesson_id: uuid.UUID) -> dict[str, Any]:
         body: dict[str, Any] = await self._post(
             f"/api/v1/lessons/{lesson_id}/complete", token=token

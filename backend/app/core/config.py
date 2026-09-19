@@ -199,6 +199,16 @@ class Settings(BaseSettings):
     supported_currencies: Annotated[tuple[str, ...], NoDecode] = ("USD",)
     default_currency: str = "USD"
 
+    #: PRD 4.3's price list, one key per plan and period, each carrying every
+    #: currency as ``CUR:amount_minor``. Amounts are integers in the smallest
+    #: unit of that currency — 199 is $1.99 and 8000 is ៛8000 — so nothing here
+    #: can be read as "cents" (CODING_STANDARDS section 3). Adding a currency
+    #: means editing these four values, not adding four more keys.
+    price_basic_monthly: str = "USD:199"
+    price_basic_yearly: str = "USD:1800"
+    price_pro_monthly: str = "USD:599"
+    price_pro_yearly: str = "USD:5400"
+
     # --------------------------------------------------------------- 6. 媒体与回退
     #: Keep false until the S2 entry conditions are met (PRD 7.2).
     media_video_enabled: bool = False
@@ -319,6 +329,28 @@ class Settings(BaseSettings):
         read — paid plans return the unlimited sentinel rather than a number.
         """
         return self.limit_free_daily_tasks if plan == "free" else 0
+
+    def price_table(self, plan: Plan, period: str) -> dict[str, int]:
+        """Prices for one plan and period, by currency.
+
+        Parsed on each call rather than cached: these are read at checkout, not
+        in a loop, and a parsed-once copy would be one more thing to invalidate
+        if the settings object is ever rebuilt.
+
+        Raises:
+            ValueError: no such plan/period combination, or a malformed price.
+        """
+        from app.services.entitlements.pricing import parse_price_table
+
+        raw = {
+            ("basic", "monthly"): self.price_basic_monthly,
+            ("basic", "yearly"): self.price_basic_yearly,
+            ("pro", "monthly"): self.price_pro_monthly,
+            ("pro", "yearly"): self.price_pro_yearly,
+        }.get((plan, period))
+        if raw is None:
+            raise ValueError(f"no price configured for {plan!r} {period!r}")
+        return parse_price_table(raw)
 
     def monthly_cost_cap_usd_cents(self, plan: Plan) -> int:
         """Per-user monthly cost ceiling from PRD section 11.2."""
