@@ -56,6 +56,32 @@ class AuthenticationFailed(AppError):
     http_status = 401
 
 
+class PermissionDenied(AppError):
+    """Authenticated, and still not allowed.
+
+    Distinct from AuthenticationFailed on purpose: a learner whose token is
+    fine but who is not an operator should be told to stop trying, not to sign
+    in again. Used for the operations endpoints, where the path is in the
+    published schema anyway so hiding it behind a 404 would buy nothing.
+    """
+
+    code = "auth.forbidden"
+    http_status = 403
+
+
+class InvalidQueryWindow(AppError):
+    """A reporting window that cannot be satisfied, such as one ending before
+    it starts.
+
+    A business error rather than a native ValueError because the caller can fix
+    it: raising ValueError here would answer a bad query string with a 500 and
+    put someone in the logs looking for a server fault.
+    """
+
+    code = "query.window_invalid"
+    http_status = 422
+
+
 class ContentNotFound(AppError):
     """No such course, lesson or item — or none this learner may see.
 

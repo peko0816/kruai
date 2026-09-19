@@ -24,6 +24,7 @@
 |---|---|---|
 | `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS` | `86400` | Mini App initData 的有效期；超过即拒绝，限制重放窗口 |
 | `JWT_ACCESS_TOKEN_TTL_SECONDS` | `3600` | 会话 token 有效期。客户端手里仍有 initData，过期后重新换发即可，无 refresh token |
+| `ADMIN_TELEGRAM_IDS` | `` | 逗号分隔的 Telegram id，允许读 `/admin/costs`。**留空即无人可读**——运维端点默认关闭 |
 
 > 签名算法（HS256）与签发者（`kruai`）不是配置项：改它们会让所有在用 token 立即失效，
 > 那是一次带迁移方案的代码变更，不是一个可调参数。

@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     #: the client still holds initData and can ask for another token — so there
     #: is no refresh-token machinery to justify a long-lived one.
     jwt_access_token_ttl_seconds: int = Field(default=3600, gt=0)
+    #: Telegram ids allowed to read /admin/costs. Empty by default, which means
+    #: nobody: an operations endpoint that is open until someone remembers to
+    #: close it is open. Telegram ids rather than our own uuids because an
+    #: operator knows theirs before the deployment exists, and a uuid is
+    #: generated per environment.
+    admin_telegram_ids: Annotated[tuple[int, ...], NoDecode] = ()
 
     # ------------------------------------------------------------ 2. Provider 选择
     scoring_provider: str = "fake"
@@ -230,6 +236,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------- validators
 
     @field_validator(
+        "admin_telegram_ids",
         "scoring_fallback_providers",
         "payment_providers",
         "subscription_auto_charge_retry_days",
