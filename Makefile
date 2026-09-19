@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate clean
 
 help:
 	@echo "KruAI make targets:"
@@ -26,6 +26,7 @@ help:
 	@echo "  make i18n-strict  fail while any translation is missing (the launch gate)"
 	@echo "  make seed       validate the content seed files"
 	@echo "  make seed-strict  also fail while a Khmer explanation is a placeholder (M1 gate)"
+	@echo "  make generate   draft the content for every seeded concept (LLM; fake by default)"
 
 sync:
 	$(UV) sync --directory $(BACKEND) --all-groups
@@ -100,6 +101,12 @@ seed:
 # The M1 gate: also refuses while any Khmer explanation is a placeholder.
 seed-strict:
 	$(ROOT_RUN) -m pipeline.validate_seed --strict
+
+# Stage [2] of the pipeline (BACKLOG E3). Free and deterministic while
+# LLM_PROVIDER=fake; with a real provider it is billed per token and refuses to
+# start without --confirm-spend (docs/DECISIONS.md D-085).
+generate:
+	$(ROOT_RUN) -m pipeline.generate
 
 clean:
 	rm -rf $(BACKEND)/.venv $(BACKEND)/.mypy_cache $(BACKEND)/.pytest_cache $(BACKEND)/.ruff_cache
