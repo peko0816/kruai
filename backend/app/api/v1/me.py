@@ -69,8 +69,13 @@ async def get_entitlements(
     """
     now = datetime.datetime.now(datetime.UTC)
     plan = await current_plan(session, user_id)
-
     timezone = await _timezone(session, user_id)
+
+    # Both reads are done. Hand the connection back before the reset and the
+    # snapshot, which open sessions of their own; holding one while asking for
+    # another is what turns the pool size into a cliff (D-073).
+    await session.commit()
+
     quota_reset = QuotaReset(session_factory=session_factory, settings=settings)
     outcome = await quota_reset.reset_if_due(user_id, timezone=timezone, now=now)
 

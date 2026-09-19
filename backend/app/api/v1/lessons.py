@@ -444,6 +444,17 @@ async def start_lesson(
     """
     now = datetime.datetime.now(datetime.UTC)
     await _load_lesson(session, lesson_id)
+    plan = await current_plan(session, user_id)
+    timezone = await _timezone_of(session, user_id)
+
+    # Every read first, then the connection goes back, then the day's counters
+    # are rolled over on a session of their own. Only after that does this
+    # request touch the database again -- one connection at a time, or a
+    # poolful of starts deadlock each other (D-073).
+    await session.commit()
+    if timezone is not None:
+        reset = QuotaReset(session_factory=session_factory, settings=settings)
+        await reset.reset_if_due(user_id, timezone=timezone, now=now)
 
     started = await _mark_started(session, user_id=user_id, lesson_id=lesson_id)
     if not started:
@@ -455,15 +466,11 @@ async def start_lesson(
             remaining_tasks=None,
         )
 
-    plan = await current_plan(session, user_id)
-    timezone = await _timezone_of(session, user_id)
-    if timezone is not None:
-        reset = QuotaReset(session_factory=session_factory, settings=settings)
-        await reset.reset_if_due(user_id, timezone=timezone, now=now)
-
     entitlements = Entitlements(session_factory=session_factory, settings=settings)
     try:
-        consumption = await entitlements.consume_task(user_id, plan=plan)
+        # On this session, so the row that marks the lesson started and the
+        # allowance that paid for it are one transaction.
+        consumption = await entitlements.consume_task(user_id, plan=plan, session=session)
     except Exception:
         # The row was inserted in this transaction and the allowance said no, so
         # the start never happened. Rolling back is what keeps a refused learner

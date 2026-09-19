@@ -13,6 +13,9 @@
 | `ENV` | `dev` | `dev` / `staging` / `prod` |
 | `LOG_LEVEL` | `INFO` | |
 | `DATABASE_URL` | — | PostgreSQL 连接串 |
+| `DB_POOL_SIZE` | `20` | 单进程常驻数据库连接数。**不要留给库默认值**：一个请求若在持有连接时又要第二条连接，池大小就成了并发悬崖（D-073） |
+| `DB_MAX_OVERFLOW` | `10` | 高峰时允许在常驻池之上临时多开的连接数 |
+| `DB_POOL_TIMEOUT_SECONDS` | `10` | 等不到连接就放弃。故意设短：与其让语音上传挂半分钟，不如让学习者早点知道要重试 |
 | `REDIS_URL` | — | |
 | `OBJECT_STORAGE_ENDPOINT` | — | 媒体文件存储 |
 | `OBJECT_STORAGE_BUCKET` | `kruai-media` | |

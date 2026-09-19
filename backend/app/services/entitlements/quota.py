@@ -147,15 +147,29 @@ class Entitlements:
         return QuotaConsumption(consumed=-count, remaining=None)
 
     async def consume_task(
-        self, user_id: uuid.UUID, *, plan: Plan, count: int = 1
+        self,
+        user_id: uuid.UUID,
+        *,
+        plan: Plan,
+        count: int = 1,
+        session: AsyncSession | None = None,
     ) -> QuotaConsumption:
-        """Spend daily task allowance, or refuse."""
+        """Spend daily task allowance, or refuse.
+
+        ``session`` lets a caller run the deduction inside its own transaction.
+        Starting a lesson needs that: the row that marks the lesson started and
+        the allowance that paid for it have to stand or fall together, and a
+        caller that already holds a connection must not reach for a second one
+        (D-073). The statement is the same guarded UPDATE either way, so
+        nothing about the race protection depends on whose session runs it.
+        """
         return await self._consume_counter(
             user_id,
             column=Entitlement.daily_tasks_used,
             limit=self._settings.daily_task_limit(plan),
             count=count,
             quota="tasks",
+            session=session,
         )
 
     async def consume_realtime_seconds(
@@ -243,6 +257,7 @@ class Entitlements:
         limit: int,
         count: int,
         quota: str,
+        session: AsyncSession | None = None,
     ) -> QuotaConsumption:
         _require_positive(count, "count")
 
@@ -259,7 +274,7 @@ class Entitlements:
             .returning(column)
         )
 
-        used = await self._run(statement, user_id=user_id, quota=quota)
+        used = await self._run(statement, user_id=user_id, quota=quota, session=session)
         remaining = None if limit == UNLIMITED else limit - used
         log.info(
             "entitlements.consumed",
@@ -270,7 +285,14 @@ class Entitlements:
         )
         return QuotaConsumption(consumed=count, remaining=remaining)
 
-    async def _run(self, statement: sa.Update, *, user_id: uuid.UUID, quota: str) -> int:
+    async def _run(
+        self,
+        statement: sa.Update,
+        *,
+        user_id: uuid.UUID,
+        quota: str,
+        session: AsyncSession | None = None,
+    ) -> int:
         """Execute a guarded update, turning no-rows into the right error.
 
         A row count of zero has two causes that the statement cannot tell apart:
@@ -278,21 +300,40 @@ class Entitlements:
         would send someone hunting a quota bug when the user was never
         provisioned, so the distinction costs one extra query on the failure
         path only.
+
+        With a borrowed ``session`` neither the commit nor the rollback happens
+        here: the caller owns that transaction and has its own reason to end it
+        one way or the other.
         """
-        async with self._session_factory() as session:
-            result = await session.execute(statement)
-            row: int | None = result.scalar_one_or_none()
-            if row is None:
-                await session.rollback()
-                exists = await session.get(Entitlement, user_id)
-                if exists is None:
-                    raise EntitlementsMissingError(_missing_message(user_id))
-                log.warning("entitlements.refused", user_id=str(user_id), quota=quota)
-                raise InsufficientQuota(
-                    f"{quota} allowance exhausted", quota=quota, user_id=str(user_id)
-                )
-            await session.commit()
+        if session is not None:
+            return await self._execute(session, statement, user_id=user_id, quota=quota)
+
+        async with self._session_factory() as own:
+            used = await self._execute(own, statement, user_id=user_id, quota=quota, undo=True)
+            await own.commit()
+            return used
+
+    async def _execute(
+        self,
+        session: AsyncSession,
+        statement: sa.Update,
+        *,
+        user_id: uuid.UUID,
+        quota: str,
+        undo: bool = False,
+    ) -> int:
+        result = await session.execute(statement)
+        row: int | None = result.scalar_one_or_none()
+        if row is not None:
             return row
+
+        if undo:
+            await session.rollback()
+        exists = await session.get(Entitlement, user_id)
+        if exists is None:
+            raise EntitlementsMissingError(_missing_message(user_id))
+        log.warning("entitlements.refused", user_id=str(user_id), quota=quota)
+        raise InsufficientQuota(f"{quota} allowance exhausted", quota=quota, user_id=str(user_id))
 
 
 def _require_positive(value: int, name: str) -> None:
