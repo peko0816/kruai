@@ -25,7 +25,10 @@ from typing import Any
 import httpx
 import pytest
 import sqlalchemy as sa
+from bot.session import KEY_PREFIX
 from fastapi import FastAPI
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.engine import URL, make_url
 
 from app.core.config import Settings
@@ -229,3 +232,45 @@ async def token_for(client: httpx.AsyncClient, **kwargs: Any) -> str:
 
 def auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+# ------------------------------------------------------------------- redis
+
+
+@pytest.fixture
+async def redis_client(settings: Settings) -> AsyncIterator[Redis]:
+    """A Redis connection, with this test's bot keys cleared around it.
+
+    Carrying constraint L-2: until D6 nothing in the repository connected to
+    Redis, so CI had no service for it and a test like this would have skipped
+    or failed depending on how it handled the refusal — and a silently skipped
+    test is the failure mode that workflow goes out of its way to prevent. The
+    service is in the workflow as of this change, so under CI an unreachable
+    Redis fails here rather than quietly passing.
+
+    Keys are namespaced and deleted rather than the database flushed: a
+    developer's Redis may hold something else.
+    """
+    client: Redis = Redis.from_url(settings.redis_url)
+    try:
+        await client.ping()
+    except RedisError as exc:
+        if os.environ.get("CI"):
+            raise RuntimeError(
+                "Redis unreachable in CI; the bot session tests would have been "
+                "skipped. Check the redis service definition in the workflow."
+            ) from exc
+        pytest.skip(f"Redis unreachable ({exc.__class__.__name__}); run `docker compose up -d`")
+
+    await _clear_bot_keys(client)
+    try:
+        yield client
+    finally:
+        await _clear_bot_keys(client)
+        await client.aclose()
+
+
+async def _clear_bot_keys(client: Redis) -> None:
+    keys = [key async for key in client.scan_iter(match=f"{KEY_PREFIX}*")]
+    if keys:
+        await client.delete(*keys)

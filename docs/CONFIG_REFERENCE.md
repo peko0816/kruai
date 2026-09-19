@@ -29,6 +29,13 @@
 > 签名算法（HS256）与签发者（`kruai`）不是配置项：改它们会让所有在用 token 立即失效，
 > 那是一次带迁移方案的代码变更，不是一个可调参数。
 
+## 1c. Bot
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `BOT_API_BASE_URL` | `http://localhost:8000` | Bot 进程访问 API 的地址。Bot 是独立进程，只走 HTTP，不 import service |
+| `BOT_SESSION_TTL_SECONDS` | `86400` | 未完成的课在 Redis 里保留多久。一天：明天还能接着上，弃置的自己清掉 |
+
 ## 2. Provider 选择
 
 | 键 | 默认 | 说明 |
