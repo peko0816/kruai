@@ -613,3 +613,41 @@ async def test_a_deleted_learner_is_not_chased(
 
     assert (charged.due, lapsed.graced) == (0, 0)
     assert rows("SELECT count(*) FROM payments WHERE is_recurring_charge = true") == [(0,)]
+
+
+# ------------------------------------------------------- what the call cost
+
+
+async def test_a_recurring_charge_leaves_a_ledger_row(
+    client: httpx.AsyncClient, settings: Settings, execute: Execute, rows: Rows
+) -> None:
+    """The auto path's call to the acquirer, recorded like any other (D-075).
+
+    Cost zero, on purpose: the fee is a cut of the charge, and billing it back
+    to the learner being charged would mean that renewing a subscription walks
+    someone toward their own throttle every month.
+    """
+    user_id = await learner(client, settings)
+    paid(execute, user_id)
+    subscribe(execute, user_id, period_end=NOW, next_charge_at=NOW)
+
+    await charge(settings)
+
+    assert rows("SELECT provider, ref, unit, cost_usd_cents_est FROM cost_ledger") == [
+        ("fake", "payment", "calls", 0)
+    ]
+
+
+async def test_a_declined_charge_is_recorded_too(
+    client: httpx.AsyncClient, settings: Settings, execute: Execute, rows: Rows
+) -> None:
+    """A call that was made is a call that happened, whatever it answered --
+    and a channel declining everything is exactly what the ledger should make
+    obvious."""
+    user_id = await learner(client, settings)
+    paid(execute, user_id)
+    subscribe(execute, user_id, period_end=NOW, next_charge_at=NOW, mandate=f"m_{FAILED_MARKER}")
+
+    await charge(settings)
+
+    assert rows("SELECT count(*) FROM cost_ledger") == [(1,)]

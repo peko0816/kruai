@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -31,6 +32,7 @@ from app.core.config import Settings
 from app.core.db import create_engine, create_session_factory
 from app.core.logging import configure_logging, get_logger
 from app.models.commerce import Payment
+from app.services.cost_ledger import CostLedger
 from app.services.payments.base import PaymentStatus
 from app.services.payments.registry import get_payment_provider
 from app.services.provider_errors import ProviderConfigurationError
@@ -64,7 +66,7 @@ async def reconcile_pending_payments(
     async with session_factory() as session:
         pending = (
             await session.execute(
-                sa.select(Payment.order_id, Payment.provider, Payment.created_at)
+                sa.select(Payment.order_id, Payment.provider, Payment.created_at, Payment.user_id)
                 .where(
                     Payment.status == PaymentStatus.PENDING.value,
                     Payment.created_at <= ripe,
@@ -74,13 +76,15 @@ async def reconcile_pending_payments(
         ).all()
 
         report = ReconcileReport(examined=len(pending))
-        for order_id, provider_name, created_at in pending:
+        for order_id, provider_name, created_at, user_id in pending:
             report = await _chase(
                 session,
+                session_factory=session_factory,
                 report=report,
                 settings=settings,
                 order_id=order_id,
                 provider_name=provider_name,
+                user_id=user_id,
                 abandon=created_at <= dead,
                 now=moment,
             )
@@ -100,10 +104,12 @@ async def reconcile_pending_payments(
 async def _chase(
     session: AsyncSession,
     *,
+    session_factory: Callable[[], AsyncSession],
     report: ReconcileReport,
     settings: Settings,
     order_id: str,
     provider_name: str,
+    user_id: uuid.UUID,
     abandon: bool,
     now: datetime.datetime,
 ) -> ReconcileReport:
@@ -116,7 +122,12 @@ async def _chase(
         log.warning("payments.reconcile_unreachable", order_id=order_id, provider=provider_name)
         return _with(report, unreachable=1)
 
-    status = await provider.query_status(order_id)
+    ledger = CostLedger(session_factory=session_factory, settings=settings)
+    async with ledger.external_call(
+        provider=provider.name, ref="payment", user_id=user_id
+    ) as entry:
+        status = await provider.query_status(order_id)
+        entry.record(unit="calls", quantity=1, cost_usd_cents=0)
 
     if status is PaymentStatus.SUCCEEDED:
         settlement = await settle_order(

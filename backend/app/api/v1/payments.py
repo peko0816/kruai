@@ -42,6 +42,7 @@ from app.core.errors import AlreadySubscribed, PaymentRefused
 from app.core.logging import get_logger
 from app.core.money import format_money
 from app.models.commerce import Payment, Subscription
+from app.services.cost_ledger import CostLedger
 from app.services.entitlements import ENTITLING_STATUSES, Entitlements
 from app.services.entitlements.pricing import (
     BILLING_PERIODS,
@@ -111,6 +112,7 @@ class CheckoutOut(BaseModel):
 async def create_checkout(
     payload: CheckoutIn,
     session: SessionDep,
+    session_factory: SessionFactoryDep,
     settings: SettingsDep,
     user_id: CurrentUserDep,
 ) -> CheckoutOut:
@@ -163,18 +165,23 @@ async def create_checkout(
     )
     await session.commit()
 
-    result = await provider.create_checkout(
-        CheckoutRequest(
-            order_id=order_id,
-            money=money,
-            product_kind=ProductKind.SUBSCRIPTION,
-            product_name=f"{payload.plan}-{payload.period}",
-            # Our user id, which is not personal data. The acquirer sees a uuid.
-            user_ref=str(user_id),
-            setup_recurring=provider.supports_recurring,
-            return_url=payload.return_url,
+    ledger = CostLedger(session_factory=session_factory, settings=settings)
+    async with ledger.external_call(
+        provider=provider.name, ref="payment", user_id=user_id
+    ) as entry:
+        result = await provider.create_checkout(
+            CheckoutRequest(
+                order_id=order_id,
+                money=money,
+                product_kind=ProductKind.SUBSCRIPTION,
+                product_name=f"{payload.plan}-{payload.period}",
+                # Our user id, which is not personal data. The acquirer sees a uuid.
+                user_ref=str(user_id),
+                setup_recurring=provider.supports_recurring,
+                return_url=payload.return_url,
+            )
         )
-    )
+        entry.record(unit="calls", quantity=1, cost_usd_cents=0)
 
     if not result.ok or not (result.checkout_url or result.qr_payload):
         await _mark_failed(session, order_id=order_id, now=now)

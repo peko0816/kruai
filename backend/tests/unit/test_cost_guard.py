@@ -188,3 +188,49 @@ def test_the_month_starts_at_midnight_utc_on_the_first(
     allowance is the other way round (C5), because that one is about their day.
     """
     assert month_start(now) == expected
+
+
+# ---------------------------------------------- the allowance and the cap
+
+
+#: PRD 11.1's unit economics, as integers. Basic's cap of $0.45 buys the 20
+#: audio-minutes that section assumes, and a drill is four seconds, so a month
+#: of Basic is 300 attempts and one attempt is 0.15 cents. Hundredths of a cent
+#: rather than a float: the whole file is integers and this is no exception.
+PRD_BASIC_AUDIO_SECONDS_MONTHLY = 20 * 60
+PRD_SECONDS_PER_ATTEMPT = 4
+DAYS_IN_MONTH = 30
+
+
+def hundredths_of_a_cent_per_attempt(config: Settings) -> int:
+    attempts = PRD_BASIC_AUDIO_SECONDS_MONTHLY // PRD_SECONDS_PER_ATTEMPT
+    return config.cost_cap_basic_usd_cents_monthly * 100 // attempts
+
+
+def test_the_free_allowance_fits_inside_the_free_cost_cap() -> None:
+    """D-074: these two numbers are not independent, and were set as if they
+    were.
+
+    A daily allowance is a promise about how much someone may practise; a cost
+    cap is a promise about what that costs us. When the first buys more than
+    the second pays for, the guardrail is what closes the gap -- which means
+    free learners get cut off partway through every month by a rule that was
+    supposed to be an exception. Ten a day did exactly that; three does not.
+    """
+    config = settings()
+    monthly_attempts = config.limit_free_daily_attempts * DAYS_IN_MONTH
+
+    spend = monthly_attempts * hundredths_of_a_cent_per_attempt(config)
+
+    assert spend <= config.cost_cap_free_usd_cents_monthly * 100
+
+
+def test_a_free_learner_at_full_allowance_never_reaches_the_throttle() -> None:
+    """The stronger form, and the one that matters to a learner: the daily
+    limit is what stops them, not the cost guard. Being told "not today" every
+    day is a plan; being told "come back next month" on the 15th is a fault."""
+    config = settings()
+    monthly_attempts = config.limit_free_daily_attempts * DAYS_IN_MONTH
+    spend_cents = monthly_attempts * hundredths_of_a_cent_per_attempt(config) // 100
+
+    assert not is_over_threshold(spend_cents, plan="free", settings=config)

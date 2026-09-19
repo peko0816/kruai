@@ -248,8 +248,8 @@ async def test_the_allowance_is_spent(
     response = await attempt(client, seeded["drill"], headers=headers)
 
     assert rows("SELECT daily_attempts_used FROM entitlements") == [(1,)]
-    # Free plan allows 10 a day; one is gone.
-    assert response.json()["remaining_attempts"] == 9
+    # Free allows three a day (D-074); one is gone.
+    assert response.json()["remaining_attempts"] == 2
 
 
 async def test_the_schedule_is_written_so_the_concept_comes_back(
@@ -552,7 +552,7 @@ async def test_the_daily_cap_refuses_before_anything_is_scored(
 ) -> None:
     """The cap is what holds PRD 11.2's cost ceiling, so it comes first."""
     headers = await authenticated(client)
-    execute("UPDATE entitlements SET daily_attempts_used = 10")
+    execute("UPDATE entitlements SET daily_attempts_used = 99")
 
     response = await attempt(client, seeded["drill"], headers=headers)
 
@@ -660,7 +660,7 @@ async def test_a_new_day_gives_the_allowance_back(
     depends on a job running is a reset that silently does not happen."""
     headers = await authenticated(client)
     execute(
-        "UPDATE entitlements SET daily_attempts_used = 10, reset_at = now() - interval '1 hour'"
+        "UPDATE entitlements SET daily_attempts_used = 99, reset_at = now() - interval '1 hour'"
     )
 
     response = await attempt(client, seeded["drill"], headers=headers)
@@ -675,12 +675,12 @@ async def test_the_reset_does_not_fire_early(
 ) -> None:
     headers = await authenticated(client)
     execute(
-        "UPDATE entitlements SET daily_attempts_used = 4, reset_at = now() + interval '5 hours'"
+        "UPDATE entitlements SET daily_attempts_used = 1, reset_at = now() + interval '5 hours'"
     )
 
     await attempt(client, seeded["drill"], headers=headers)
 
-    assert rows("SELECT daily_attempts_used FROM entitlements") == [(5,)]
+    assert rows("SELECT daily_attempts_used FROM entitlements") == [(2,)]
 
 
 # ------------------------------------------------------------------ stability

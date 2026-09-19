@@ -167,7 +167,13 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------- 4. 额度与限制
     limit_free_daily_tasks: int = Field(default=3, ge=0)
-    limit_free_daily_attempts: int = Field(default=10, ge=0)
+    #: [$] Derived from the Free cost cap rather than picked (D-074). PRD 11.1
+    #: prices Basic's 20 audio-minutes at $0.45, which is 0.15 cents for a
+    #: four-second drill; $0.15 buys a hundred of those a month, so three a day
+    #: is what the cap pays for. Raising this without raising
+    #: COST_CAP_FREE_USD_CENTS_MONTHLY puts free learners into the throttle
+    #: partway through every month.
+    limit_free_daily_attempts: int = Field(default=3, ge=0)
     #: 0 means unlimited.
     limit_basic_daily_attempts: int = Field(default=0, ge=0)
     limit_pro_realtime_seconds_monthly: int = Field(default=3600, ge=0)
