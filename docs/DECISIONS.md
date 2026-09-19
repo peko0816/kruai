@@ -1038,6 +1038,26 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   一句自信的解释，如果没人去验证，就会指导后面所有相关改动——
   这和 C5 那次 DST docstring 写错是同一类。
 
+## D-043 一个「任务」= 完成一节课
+
+- 日期：2026-09-19
+- 背景：`LIMIT_FREE_DAILY_TASKS`（Free 每日 3 个任务）从 A3 起就是配置项，
+  但没有任何消费者，因为 PRD 里「任务」出现了两种读法：
+  4.3 的套餐表把它与「每日 10 句评分」并列，读起来像**一节课**；
+  4.1 的正文「Bot 发出任务提示 → 用户发 voice note」读起来像**一道口语题**。
+  这是计量口径，按 CLAUDE.md 第 6 节属于必须问人的一类。
+- 选择：**一个任务 = 完成一节课**，在 `POST /lessons/{id}/complete` 扣减，
+  重复完课不重复扣（完课本身已是幂等的，见 D-040）。
+  由项目所有者于 2026-09-19 拍板。
+- 理由：只有这个口径能让 PRD 4.3 表里的两个数字自洽。
+  3 节课 × 每节若干句 ≈ 10 句评分；若按题算，Free 用户 3 道题就用完，
+  10 句的额度永远用不到，两个限额互相矛盾。
+- 实现位置：**BACKLOG D8a**（付费墙，「Free/Basic 限额生效」）。
+  D4 已经把完课端点建好且幂等，接入是在那里加一次 `consume_task`
+  与一条 402 的分支。
+- 回退成本：低。口径变了就换扣减点，`consume_task` 的实现本身不用动。
+- 影响范围：`app/api/v1/lessons.py`、`services/entitlements/quota.py`、D8a。
+
 ---
 
 # 遗留约束
@@ -1058,7 +1078,7 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 | L-5 | `OBJECT_STORAGE_ENDPOINT` 与 `PUBLIC_MEDIA_BASE_URL` 仍为空，**`Settings` 中必须保持可选**。声明为必填会让全 fake 配置启动失败，直接违反 G-B 验收。 | BACKLOG E6 / E7（真实对象存储） | 见 D-002；`core/config.py` |
 | L-7 | **按当前默认参数，`ease_factor` 必然在 mastery 还很低的时候就触底，复习间隔长期停在 1 天。** 算一遍：drill 权重 0.6、`MASTERY_DELTA_BASE=40`、及格线 60，则满分一次只加 0.6 分，要爬到 `MASTERY_LOW`(60) 需要约 100 次；而在那之前每一次都落在「reset」带里，每次扣 0.2 ease，**6 次后就到 `SM2_EASE_MIN`(1.3)**。也就是说间隔重复在默认配置下几乎不生效。算法实现没错（PRD 9.2 原样如此，见 D-015/D-016），错的是参数标定。**M0-1 拿到真实分数分布后，必须连同 `MASTERY_DELTA_BASE` 与三个权重一起重新标定**，不要只调 `SCORING_PASS_THRESHOLD`。 | M0-1 结论落地时；或第一次有人问「为什么所有概念天天都要复习」 | `services/mastery/sm2.py` 的 `schedule_review`；`core/config.py` 的 `mastery_delta_base` |
 
-| L-8 | **`LIMIT_FREE_DAILY_TASKS`（Free 每日 3 个任务）至今没有任何消费者。** `consume_task()` 写好了、测过了，没人调用。原因是「一个任务」的口径未定：PRD 4.3 的表里像是「一节课」，而 4.1 的正文里「Bot 发出任务提示」像是「一道口语题」。这是计量口径，属于 CLAUDE.md 第 6 节必须问人的一类，不自行决定。**定了口径才能接**，否则 Free 档的这条限额等于不存在。 | BACKLOG D8a（付费墙），或更早——一旦有人问「Free 用户的每日 3 个任务在哪生效」 | `services/entitlements/quota.py` 的 `consume_task` |
-| L-9 | **`streaks` 表没有任何写入方。** 它只在 PRD 第 9 节的表清单里出现过一次，没有任何 BACKLOG 条目、没有行为规格。完课是它最自然的写入点，但那属于扩范围（CLAUDE.md R6），所以 D4 没做。**要么补规格要么删表**——一张永远为空的表，会让后面每个读它的人先花时间确认它是不是坏了。 | 有人要做连续打卡 / 留存激励时；或 M4 月报需要活跃度指标时 | `models/learning.py` 的 `Streak` |
+| L-8 | **`LIMIT_FREE_DAILY_TASKS`（Free 每日 3 个任务）仍然没有任何消费者**，所以 Free 档的这条限额目前等于不存在。口径已不再是障碍：D-043 已定「一个任务 = 完成一节课」，剩下的只是接线——在 `POST /lessons/{id}/complete` 里扣一次 `consume_task`，额度不足返回 402。 | BACKLOG D8a（付费墙）。在那之前 Free 用户不受任务数限制，只受每日 10 句评分限制 | `services/entitlements/quota.py` 的 `consume_task` |
+| L-9 | **`streaks` 表没有任何写入方。** 它只在 PRD 第 9 节的表清单里出现过一次，没有任何 BACKLOG 条目、没有行为规格。完课是它最自然的写入点，但那属于扩范围（CLAUDE.md R6），所以 D4 没做。**要么补规格要么删表**——一张永远为空的表，会让后面每个读它的人先花时间确认它是不是坏了。项目所有者于 2026-09-19 确认**暂时留着不动**，不必再问一次。 | 有人要做连续打卡 / 留存激励时；或 M4 月报需要活跃度指标时 | `models/learning.py` 的 `Streak` |
 
 **处理完一条就把它从这张表里删掉**，并在对应的代码注释里说明已解决——留着一条已经不成立的约束，比没有这张表更糟。
