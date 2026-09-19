@@ -178,10 +178,12 @@ class Settings(BaseSettings):
 
     # --------------------------------------------------------------- 5. 成本护栏 [$]
     #: The only float that touches money, and it is a ratio rather than an
-    #: amount, so R4 holds. But the comparison it drives is not exact:
-    #: 45 * 1.5 is 67.5, and whoever implements the guardrail has to decide
-    #: which side of 67 counts as over. Round explicitly at that call site
-    #: rather than letting float ordering decide it.
+    #: amount, so R4 holds. The comparison it drives is not exact -- 45 * 1.5
+    #: is 67.5, and which side of 67 counts as over is a decision -- so it is
+    #: made once, in services/entitlements/cost_guard.py: the ratio is scaled
+    #: to an integer per thousand and the threshold rounds up, which puts the
+    #: line at 68. Carry-forward constraint L-1, discharged there (D-070).
+    #: Nothing else may compare against this float directly.
     cost_alert_multiplier: float = Field(default=1.5, gt=0.0)
     cost_cap_free_usd_cents_monthly: int = Field(default=15, ge=0)
     cost_cap_basic_usd_cents_monthly: int = Field(default=45, ge=0)

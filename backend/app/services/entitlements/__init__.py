@@ -12,6 +12,12 @@ reading their subscriptions. It reads ``status`` and does not re-derive it from
 the dates; that state machine belongs to the renewal task (ARCHITECTURE 3.4).
 """
 
+from app.services.entitlements.cost_guard import (
+    alert_threshold_usd_cents,
+    is_over_threshold,
+    month_start,
+    monthly_spend_usd_cents,
+)
 from app.services.entitlements.plan import (
     ENTITLING_STATUSES,
     FREE_PLAN,
@@ -42,8 +48,12 @@ __all__ = [
     "QuotaReset",
     "QuotaSnapshot",
     "ResetOutcome",
+    "alert_threshold_usd_cents",
     "best_plan",
     "current_plan",
+    "is_over_threshold",
     "load_timezone",
+    "month_start",
+    "monthly_spend_usd_cents",
     "next_reset_at",
 ]

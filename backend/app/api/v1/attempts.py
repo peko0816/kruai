@@ -35,14 +35,27 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
-from app.core.config import Settings
-from app.core.errors import AudioTooLarge, ContentNotFound, ItemNotScorable, ScoringUnavailable
+from app.core.config import Plan, Settings
+from app.core.errors import (
+    AudioTooLarge,
+    ContentNotFound,
+    CostCapReached,
+    ItemNotScorable,
+    ScoringUnavailable,
+)
 from app.core.logging import get_logger
 from app.models.content import Concept, Course, Lesson, LessonItem
 from app.models.learning import Attempt, ConceptMastery
 from app.models.users import UserProfile
 from app.services.cost_ledger import CostLedger
-from app.services.entitlements import Entitlements, QuotaReset, current_plan
+from app.services.entitlements import (
+    Entitlements,
+    QuotaReset,
+    alert_threshold_usd_cents,
+    current_plan,
+    is_over_threshold,
+    monthly_spend_usd_cents,
+)
 from app.services.mastery import (
     INITIAL_INTERVAL_DAYS,
     MasteryUpdate,
@@ -202,6 +215,8 @@ async def create_attempt(
         ItemNotScorable: an attempt against a lecture card.
         AudioTooLarge: over ATTEMPT_MAX_AUDIO_BYTES.
         InsufficientQuota: the daily allowance is spent (402).
+        CostCapReached: this learner has cost more this month than their plan
+            allows for (429).
         ScoringUnavailable: the provider could not assess it. Nothing is
             charged and nothing is stored.
     """
@@ -210,6 +225,7 @@ async def create_attempt(
     payload = await _read_audio(audio, settings=settings)
 
     plan = await current_plan(session, user_id)
+    await _guard_cost(session, user_id=user_id, plan=plan, settings=settings, now=now)
     entitlements = Entitlements(session_factory=session_factory, settings=settings)
     await _reset_quota_if_due(
         session, session_factory=session_factory, settings=settings, user_id=user_id, now=now
@@ -337,6 +353,43 @@ def _reference_text(item: LessonItem) -> str:
             f"usable {TARGET_TEXT_FIELD!r}; the pack should not have imported"
         )
     return value
+
+
+async def _guard_cost(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    plan: Plan,
+    settings: Settings,
+    now: datetime.datetime,
+) -> None:
+    """Refuse before anything is spent, when this learner has cost too much.
+
+    Checked ahead of the allowance deduction and ahead of the scorer, because
+    both of those are things a throttled learner should not have happen: the
+    first would take an attempt they never got to use, the second is the actual
+    money (PRD 11.3).
+
+    Raises:
+        CostCapReached: past the plan's alert threshold for this month.
+    """
+    spend = await monthly_spend_usd_cents(session, user_id=user_id, now=now)
+    if not is_over_threshold(spend, plan=plan, settings=settings):
+        return
+
+    threshold = alert_threshold_usd_cents(plan, settings=settings)
+    # The alert half of PRD 11.3. Error rather than warning: a learner costing
+    # half again what their plan allows is either a pricing problem or an
+    # abuse, and both want somebody to look.
+    log.error(
+        "cost.cap_exceeded",
+        user_id=str(user_id),
+        plan=plan,
+        spend_usd_cents=spend,
+        threshold_usd_cents=threshold,
+        cap_usd_cents=settings.monthly_cost_cap_usd_cents(plan),
+    )
+    raise CostCapReached(plan=plan, spend_usd_cents=spend, threshold_usd_cents=threshold)
 
 
 async def _read_audio(audio: UploadFile, *, settings: Settings) -> bytes:

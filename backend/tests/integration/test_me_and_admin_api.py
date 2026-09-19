@@ -274,6 +274,20 @@ async def test_the_dashboard_sees_what_an_attempt_recorded(
     assert body["rows"][0]["calls"] == 1
 
 
+async def test_the_dashboard_reports_the_thresholds_spend_is_judged_against(
+    settings: Settings,
+) -> None:
+    """So an operator reads a per-user total against the number that acts on
+    it, rather than recomputing 1.5 times something in their head (D10)."""
+    configured = with_operator(settings)
+
+    async with client_for(configured) as client:
+        headers = await authenticated(client, telegram_id=OPERATOR_TELEGRAM_ID)
+        body = (await client.get(COSTS_URL, headers=headers)).json()
+
+    assert body["alert_thresholds_usd_cents"] == {"free": 23, "basic": 68, "pro": 345}
+
+
 async def test_grouping_by_provider(settings: Settings, execute: Execute) -> None:
     configured = with_operator(settings)
 
@@ -432,6 +446,7 @@ async def test_an_empty_ledger_reports_zero_rather_than_failing(
         "group_by": "day",
         "since": body["since"],
         "until": body["until"],
+        "alert_thresholds_usd_cents": {"free": 23, "basic": 68, "pro": 345},
         "total_usd_cents": 0,
         "total_entries": 0,
         "rows": [],
