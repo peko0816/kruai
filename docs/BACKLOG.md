@@ -119,7 +119,7 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | # | 状态 | 任务 | 依赖 | 验收 |
 |---|---|---|---|---|
 | E1 | ✅ #37 | seed YAML schema 定义 + 校验器；`pipeline/seed/zh-hsk3.0/` 目录结构 | A1 | 非法 seed 被拒并指出具体字段 |
-| E2 | ✅ #PRNUM | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
+| E2 | ✅ #38 | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
 | E3 | — | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
 | E4 | — | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
 | E5 | — | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
