@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot i18n i18n-strict clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict clean
 
 help:
 	@echo "KruAI make targets:"
@@ -21,6 +21,7 @@ help:
 	@echo "  make migrate    alembic upgrade head (available after A4)"
 	@echo "  make run        uvicorn --factory app.main:create_app --reload"
 	@echo "  make bot        run the Telegram bot against a running API"
+	@echo "  make jobs       run the scheduled jobs once (renewals, reminders, reconciliation)"
 	@echo "  make i18n       report how many translations are still placeholders"
 	@echo "  make i18n-strict  fail while any translation is missing (the launch gate)"
 
@@ -65,6 +66,12 @@ BOT_RUN := PYTHONPATH=$(CURDIR) $(UV_RUN) python
 # Needs TELEGRAM_BOT_TOKEN in .env and `make run` already serving the API.
 bot:
 	$(BOT_RUN) -m bot.main
+
+# The scheduled jobs. No scheduler is wired up yet: run them from cron, from
+# RQ, or by hand. Each is idempotent and safe to run more often than needed.
+jobs:
+	$(UV_RUN) python -m app.workers.subscriptions
+	$(UV_RUN) python -m app.workers.payments
 
 # Reports how much of the catalogue is still waiting for a translator. Never
 # fails on that count: see bot/i18n_check.py on why it is a launch gate.

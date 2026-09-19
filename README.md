@@ -27,6 +27,7 @@ make check                    # lint + format + mypy strict + pytest
 | `make migrate` | `alembic upgrade head` |
 | `make run` | 启动 API（`uvicorn --factory app.main:create_app`） |
 | `make bot` | 启动 Telegram Bot（需先 `make run`） |
+| `make jobs` | 跑一次定时任务（续费扣款、续费提醒、过期降级、支付对账） |
 | `make i18n` | 报告还有多少条翻译没写（不阻断） |
 | `make i18n-strict` | 上线闸门：还有占位符就失败 |
 | `make sync` | 同步依赖 |

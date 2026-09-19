@@ -17,6 +17,7 @@
   "bot.prompt_qa": "Answer out loud: {text}",
   "bot.prompt_vocab": "Say this: {text}",
   "bot.quota_exhausted": "Today's practice allowance is used up. It comes back at {resets_at}.",
+  "bot.renewal_reminder": "Your subscription ends soon. Send /learn to keep going, or renew to keep unlimited practice.",
   "bot.score_failed_moving_on": "{score}/100 — we will come back to this one later.",
   "bot.score_failed_retry": "{score}/100 — try once more ({used} of {limit}).",
   "bot.score_passed": "{score}/100 — good. Moving on.",
