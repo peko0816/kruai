@@ -113,6 +113,14 @@ class Settings(BaseSettings):
     #: generated per environment.
     admin_telegram_ids: Annotated[tuple[int, ...], NoDecode] = ()
 
+    # ------------------------------------------------------------------ 1c. Bot
+    #: Where the bot reaches the API. It is a separate process talking HTTP,
+    #: not an import of the services (ARCHITECTURE section 1).
+    bot_api_base_url: str = "http://localhost:8000"
+    #: How long an unfinished lesson is remembered. A day: long enough to pick
+    #: one back up tomorrow, short enough that abandoned state clears itself.
+    bot_session_ttl_seconds: int = Field(default=86400, gt=0)
+
     # ------------------------------------------------------------ 2. Provider 选择
     scoring_provider: str = "fake"
     scoring_fallback_providers: Annotated[tuple[str, ...], NoDecode] = ()

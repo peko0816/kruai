@@ -37,7 +37,6 @@ dev = [
     "mypy>=1.11",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "types-redis>=4.6",
     # Test-only. FakeLLM claims its output satisfies the caller's json_schema;
     # this checks that claim against a real validator instead of against our own
     # reading of the spec. Never imported by app code.
@@ -120,7 +119,12 @@ warn_unused_ignores = true
 warn_unreachable = true
 show_error_codes = true
 plugins = ["pydantic.mypy"]
-files = ["app", "tests"]
+# ../bot is a sibling package, not part of the backend distribution: it is a
+# separate process that talks to the API over HTTP (ARCHITECTURE section 1).
+# It shares this toolchain rather than carrying a second one, because two
+# ruff/mypy/pytest configurations drift and only one of them gets updated.
+files = ["app", "tests", "../bot"]
+mypy_path = ".."
 exclude = ["alembic/versions"]
 
 [[tool.mypy.overrides]]
@@ -131,7 +135,9 @@ ignore_missing_imports = true
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "../bot/tests"]
+# The bot imports as a top-level `bot` package from the repository root.
+pythonpath = [".."]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
 filterwarnings = ["error"]
