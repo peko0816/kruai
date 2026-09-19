@@ -107,6 +107,20 @@ class LessonNotStarted(AppError):
     http_status = 409
 
 
+class CostCapReached(AppError):
+    """This learner has cost more this month than their plan allows for.
+
+    PRD section 11 makes the per-user ceiling a hard constraint, and 11.3 says
+    what to do about it: alert, and throttle. 429 rather than 402 — they are
+    not out of a quota they can see or buy, they are being slowed down — and
+    the number that did it stays in the log rather than going out with the
+    refusal.
+    """
+
+    code = "cost.cap_reached"
+    http_status = 429
+
+
 class ItemNotScorable(AppError):
     """Something was said back to a card that has nothing to say back to.
 

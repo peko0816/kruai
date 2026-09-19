@@ -16,6 +16,7 @@ file means a fixed score: a number that moves here is the code moving.
 from __future__ import annotations
 
 import datetime
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -398,6 +399,148 @@ async def test_repeated_failures_do_not_drain_the_allowance(
         await attempt(client, seeded["drill"], headers=headers, audio=b"")
 
     assert rows("SELECT daily_attempts_used FROM entitlements") == [(0,)]
+
+
+# ------------------------------------------------------------- the cost ceiling
+
+
+def spent(execute: Execute, user_id: uuid.UUID, cents: int, *, days_ago: int = 0) -> None:
+    """Ledger rows placed in the past, which no endpoint can do."""
+    execute(
+        "INSERT INTO cost_ledger (occurred_at, user_id, provider, unit, quantity, "
+        " cost_usd_cents_est, ref) "
+        "VALUES (now() - make_interval(days => :d), :u, 'fake', 'calls', 1, :c, 'attempt')",
+        d=days_ago,
+        u=user_id,
+        c=cents,
+    )
+
+
+async def test_a_learner_past_the_ceiling_is_throttled(
+    client: httpx.AsyncClient,
+    seeded: dict[str, uuid.UUID],
+    rows: Rows,
+    execute: Execute,
+    settings: Settings,
+) -> None:
+    """PRD 11.3, and the point of the whole cost_ledger discipline: the ceiling
+    is enforced against what was actually recorded."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    spent(execute, user_id, 68)  # basic's threshold; free's is 23
+
+    response = await attempt(client, seeded["drill"], headers=headers)
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "cost.cap_reached"
+
+
+async def test_a_throttled_learner_costs_nothing_more(
+    client: httpx.AsyncClient,
+    seeded: dict[str, uuid.UUID],
+    rows: Rows,
+    execute: Execute,
+    settings: Settings,
+) -> None:
+    """Refused before the allowance is spent and before the scorer is called —
+    both of which a throttled learner should not have happen."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    spent(execute, user_id, 30)
+
+    await attempt(client, seeded["drill"], headers=headers)
+
+    assert rows("SELECT count(*) FROM cost_ledger") == [(1,)], "no new call was made"
+    assert rows("SELECT daily_attempts_used FROM entitlements") == [(0,)]
+    assert rows("SELECT count(*) FROM attempts") == [(0,)]
+
+
+async def test_the_boundary_is_the_one_the_unit_tests_pin(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], settings: Settings, execute: Execute
+) -> None:
+    """Free's cap is 15, so 1.5 times it is 22.5 and the line falls at 23."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    spent(execute, user_id, 22)
+
+    assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 201
+
+    spent(execute, user_id, 1)  # 22 + 1 spent above + 1 for the attempt = 24
+
+    assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 429
+
+
+async def test_a_paid_plan_gets_the_headroom_it_paid_for(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """Free throttles at 23 and Basic at 68; the same spend is fine on one."""
+    user_id = await sign_in(client, settings)
+    execute(
+        "INSERT INTO subscriptions (user_id, plan, status, period_start, period_end) "
+        "VALUES (:u, 'basic', 'active', now(), now() + interval '30 days')",
+        u=user_id,
+    )
+    headers = await authenticated(client)
+    spent(execute, user_id, 30)
+
+    assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 201
+
+
+async def test_last_month_s_spending_does_not_count(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """The cap is monthly. A learner who was throttled in March starts April
+    with a clean slate, which is what "per month" means."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    spent(execute, user_id, 500, days_ago=40)
+
+    assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 201
+
+
+async def test_one_learner_s_spending_does_not_throttle_another(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    expensive = await sign_in(client, settings, telegram_id=8801)
+    spent(execute, expensive, 500)
+    headers = await authenticated(client, telegram_id=8802)
+
+    assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 201
+
+
+async def test_the_alert_names_the_numbers_that_caused_it(
+    client: httpx.AsyncClient,
+    seeded: dict[str, uuid.UUID],
+    execute: Execute,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The alert half of PRD 11.3. A learner costing half again what their plan
+    allows is either a pricing problem or an abuse; both want somebody to look,
+    and both need the numbers."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    spent(execute, user_id, 99)
+
+    with caplog.at_level(logging.ERROR):
+        await attempt(client, seeded["drill"], headers=headers)
+
+    assert "cost.cap_exceeded" in caplog.text
+    assert "99" in caplog.text
+
+
+async def test_the_learner_is_not_told_what_they_cost(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """Our unit costs are ours. The response says to come back later."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    spent(execute, user_id, 99)
+
+    response = await attempt(client, seeded["drill"], headers=headers)
+
+    assert "99" not in response.text
+    assert "threshold" not in response.text
 
 
 # ------------------------------------------------------------------- refusals

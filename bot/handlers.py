@@ -38,6 +38,7 @@ _ERROR_MESSAGE_KEYS: Final[dict[str, str]] = {
     "quota.insufficient": "bot.quota_exhausted",
     "payment.already_subscribed": "bot.already_subscribed",
     "scoring.unavailable": "bot.scoring_unavailable",
+    "cost.cap_reached": "bot.cost_cap_reached",
     "attempt.item_not_scorable": "bot.error",
     "attempt.audio_too_large": "bot.error",
 }

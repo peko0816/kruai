@@ -17,6 +17,13 @@ is an open endpoint.
 Costs are estimates (``cost_usd_cents_est``), written by whoever made the call
 from what the provider said it charged. They are not an invoice, and the gap
 between them and the real bill is itself worth watching.
+
+**This dashboard reports; it does not enforce.** The ceiling itself lives in
+``services/entitlements/cost_guard.py`` and is applied on the attempt path, so
+a learner past it is throttled whether or not anybody is looking at this page
+(PRD 11.3, BACKLOG D10). What the report adds is the thresholds themselves,
+beside the spend, so the numbers on the screen can be compared without knowing
+the multiplier by heart.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ from app.core.errors import InvalidQueryWindow, PermissionDenied
 from app.core.logging import get_logger
 from app.models.commerce import CostLedger
 from app.models.users import User
+from app.services.entitlements import alert_threshold_usd_cents
 
 log = get_logger(__name__)
 
@@ -75,6 +83,11 @@ class CostReportOut(BaseModel):
     since: datetime.date
     until: datetime.date
     total_usd_cents: int
+    #: The monthly spend at which each plan is throttled (PRD 11.3), so a
+    #: per-user total can be read against the number that acts on it without
+    #: the operator recomputing 1.5 times anything in their head. Static
+    #: configuration, not a query.
+    alert_thresholds_usd_cents: dict[str, int]
     #: Ledger rows in the window, before grouping. A total of zero with a
     #: non-zero count means the calls were free, not that nothing happened.
     total_entries: int
@@ -120,6 +133,10 @@ async def get_costs(
         group_by=group_by,
         since=window_since,
         until=window_until,
+        alert_thresholds_usd_cents={
+            plan: alert_threshold_usd_cents(plan, settings=settings)
+            for plan in ("free", "basic", "pro")
+        },
         total_usd_cents=sum(row.cost_usd_cents for row in rows),
         total_entries=sum(row.calls for row in rows),
         rows=rows,

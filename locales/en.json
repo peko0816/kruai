@@ -5,6 +5,7 @@
   "bot.all_lessons_done": "You have finished every lesson available. Send /status to see today's allowance.",
   "bot.already_subscribed": "You already have an active subscription.",
   "bot.awaiting_voice": "Send a voice message for this step.",
+  "bot.cost_cap_reached": "You have practised a lot this month. Please try again later.",
   "bot.error": "Something went wrong. Please try again.",
   "bot.explain": "{text}",
   "bot.help": "/learn — start or resume a lesson\n/stop — end the current lesson\n/status — what is left of today's allowance",
