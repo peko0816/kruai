@@ -30,6 +30,8 @@ make check                    # lint + format + mypy strict + pytest
 | `make jobs` | 跑一次定时任务（续费扣款、续费提醒、过期降级、支付对账） |
 | `make i18n` | 报告还有多少条翻译没写（不阻断） |
 | `make i18n-strict` | 上线闸门：还有占位符就失败 |
+| `make seed` | 校验 `pipeline/seed/` 的内容 seed，并报告还缺多少条高棉语解释 |
+| `make seed-strict` | M1 闸门：还有高棉语占位符就失败 |
 | `make sync` | 同步依赖 |
 
 没起数据库时，schema 一致性的集成测试会跳过并提示；CI 里则会直接失败，不允许静默跳过。
@@ -58,6 +60,7 @@ backend/          FastAPI 后端
   tests/            unit（纯逻辑）/ integration（需真实 PG）
 bot/              Telegram Bot
 pipeline/         内容生产管线（离线 CLI，不属于请求链路）
+  seed/             人工录入的 concept 骨架，来源受 R7 白名单约束
 interfaces/       规范性 Provider 接口，须原样复制，签名不得改
 docs/             规格与决策
 ```
