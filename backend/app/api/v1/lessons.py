@@ -19,12 +19,14 @@ false — its default until S2 — ``assign`` reads nothing and writes nothing
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Any
 
 import sqlalchemy as sa
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 from pydantic import BaseModel
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
@@ -32,9 +34,11 @@ from app.core.config import Settings
 from app.core.errors import ContentNotFound
 from app.core.logging import get_logger
 from app.models.content import Course, Lesson, LessonItem, MediaAsset
+from app.models.learning import ConceptMastery, LessonProgress
 from app.models.users import UserProfile
 from app.services.entitlements import current_plan
 from app.services.experiments import EXPLAIN_MEDIA, Experiments
+from app.services.mastery import INITIAL_INTERVAL_DAYS, initial_ease_factor
 from app.services.media import MediaCandidate, ResolvedMedia, ViewerContext, resolve
 
 log = get_logger(__name__)
@@ -81,6 +85,21 @@ class LessonDetailOut(BaseModel):
     title_km: str
     concept_ids: list[uuid.UUID]
     items: list[LessonItemOut]
+
+
+class LessonCompletionOut(BaseModel):
+    """What completing a lesson left behind."""
+
+    lesson_id: uuid.UUID
+    status: str
+    completed_at: datetime.datetime
+    #: Concepts of this lesson that now have a mastery row and a due date.
+    concepts_tracked: int
+    #: Concepts this call put on the review schedule for the first time —
+    #: the ones the learner never spoke to.
+    concepts_newly_scheduled: int
+    #: False when the lesson had already been completed before this call.
+    first_completion: bool
 
 
 @router.get("/{lesson_id}")
@@ -232,3 +251,144 @@ def _item_out(item: LessonItem, media: ResolvedMedia) -> LessonItemOut:
             disclaimer_key=media.disclaimer_key,
         ),
     )
+
+
+# ---------------------------------------------------------------- completion
+
+
+@router.post("/{lesson_id}/complete", status_code=status.HTTP_200_OK)
+async def complete_lesson(
+    lesson_id: uuid.UUID,
+    session: SessionDep,
+    settings: SettingsDep,
+    user_id: CurrentUserDep,
+) -> LessonCompletionOut:
+    """Mark a lesson finished and make sure all of its concepts are scheduled.
+
+    PRD 3.3 ends a lesson with "update concept_mastery, write the review
+    queue". The mastery half already happened: D3 moves a concept's score on
+    every attempt. What is left is the concepts the learner never spoke to —
+    a lesson they clicked through, or items they skipped. Those have no
+    concept_mastery row at all, so spaced repetition would never surface them
+    and the lesson would be "done" while part of it had never been practised.
+
+    So completion seeds a row for every concept in the lesson that lacks one,
+    due tomorrow. Concepts that already have a row are left exactly as they
+    are: their schedule is in flight and the stored row outranks any recompute
+    (the same rule as docs/DECISIONS.md D-023).
+
+    Idempotent. Completing twice keeps the first ``completed_at`` — a learner
+    revisiting a lesson has not un-finished it, and moving the timestamp would
+    quietly rewrite when they got there.
+
+    Raises:
+        ContentNotFound: no such lesson, or one behind an organisation course.
+    """
+    now = datetime.datetime.now(datetime.UTC)
+    lesson = await _load_lesson(session, lesson_id)
+
+    completed_at, first_completion = await _mark_completed(
+        session, user_id=user_id, lesson_id=lesson_id, now=now
+    )
+    newly_scheduled = await _schedule_untouched_concepts(
+        session,
+        user_id=user_id,
+        concept_ids=list(lesson.concept_ids),
+        now=now,
+        settings=settings,
+    )
+    await session.commit()
+
+    log.info(
+        "lesson.completed",
+        user_id=str(user_id),
+        lesson_id=str(lesson_id),
+        first_completion=first_completion,
+        concepts=len(lesson.concept_ids),
+        newly_scheduled=newly_scheduled,
+    )
+
+    return LessonCompletionOut(
+        lesson_id=lesson_id,
+        status="completed",
+        completed_at=completed_at,
+        concepts_tracked=len(lesson.concept_ids),
+        concepts_newly_scheduled=newly_scheduled,
+        first_completion=first_completion,
+    )
+
+
+async def _mark_completed(
+    session: AsyncSession, *, user_id: uuid.UUID, lesson_id: uuid.UUID, now: datetime.datetime
+) -> tuple[datetime.datetime, bool]:
+    """Write lesson_progress, keeping the first completion time.
+
+    The upsert only promotes a row that is not yet completed, so a second call
+    changes nothing and the returned timestamp is whatever the first one wrote.
+    """
+    statement = (
+        pg_insert(LessonProgress)
+        .values(user_id=user_id, lesson_id=lesson_id, status="completed", completed_at=now)
+        .on_conflict_do_update(
+            index_elements=["user_id", "lesson_id"],
+            set_={"status": "completed", "completed_at": now},
+            where=LessonProgress.status != "completed",
+        )
+        .returning(LessonProgress.completed_at)
+    )
+    written: datetime.datetime | None = (await session.execute(statement)).scalar_one_or_none()
+    if written is not None:
+        return written, True
+
+    # The upsert's WHERE refused, which means a completed row is already there.
+    stored = await session.execute(
+        sa.select(LessonProgress.completed_at).where(
+            LessonProgress.user_id == user_id, LessonProgress.lesson_id == lesson_id
+        )
+    )
+    previous = stored.scalar_one()
+    # completed_at is nullable in the DDL; a completed row without one would
+    # mean something else wrote it, and there is no earlier time to preserve.
+    return previous or now, False
+
+
+async def _schedule_untouched_concepts(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    concept_ids: list[uuid.UUID],
+    now: datetime.datetime,
+    settings: Settings,
+) -> int:
+    """Give every unpractised concept of this lesson a row and a due date.
+
+    ``ON CONFLICT DO NOTHING`` is the whole guarantee: a concept the learner
+    has attempted keeps its mastery, its ease and its next_due_at untouched.
+
+    ease_factor comes from SM2_EASE_INITIAL rather than the column default,
+    for the reason in services/mastery/sm2.py (the retired constraint L-6):
+    the two agree today and would stop agreeing silently.
+    """
+    if not concept_ids:
+        return 0
+
+    statement = (
+        pg_insert(ConceptMastery)
+        .values(
+            [
+                {
+                    "user_id": user_id,
+                    "concept_id": concept_id,
+                    "mastery_score": 0.0,
+                    "attempt_count": 0,
+                    "ease_factor": initial_ease_factor(settings),
+                    "interval_days": INITIAL_INTERVAL_DAYS,
+                    "next_due_at": now + datetime.timedelta(days=INITIAL_INTERVAL_DAYS),
+                }
+                for concept_id in concept_ids
+            ]
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "concept_id"])
+        .returning(ConceptMastery.concept_id)
+    )
+    return len((await session.execute(statement)).scalars().all())

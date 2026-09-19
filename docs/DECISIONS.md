@@ -961,6 +961,83 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 回退成本：低。
 - 影响范围：`app/api/v1/attempts.py`、`core/config.py`、E9。
 
+## D-039 完课时为「没开过口」的 concept 补建 mastery 行，已有行一律不动
+
+- 日期：2026-09-19
+- 背景：PRD 3.3 的结尾是「lesson_complete → 更新 concept_mastery → 写入 review_queue」。
+  但 mastery 那一半 D3 已经在做了——每次开口都会更新。那完课还剩什么？
+- 选择：为这节课 `concept_ids` 里**还没有 mastery 行**的 concept 各建一行：
+  mastery 0、attempt_count 0、ease = `SM2_EASE_INITIAL`、**明天到期**。
+  已有行（学习者练过的）一个字段都不改。
+- 理由：
+  - **剩下的正是「点完但没练」的部分**。D3 只在 attempt 落地时建行，
+    所以一节课里跳过的 item、纯讲解的 concept，永远不会有行，
+    也就**永远不会进复习队列**——课显示「已完成」，而其中一部分从未被练过，
+    且没有任何地方会提醒。
+  - **不碰已有行**：它们的排期正在生效中，重算等于把学习者的进度抹平。
+    与 D-023 同一条：行一旦存在，行就是答案。
+  - **为什么是明天而不是立刻到期**：刚上完课的 concept 立刻出现在复习队列里，
+    就是间隔重复被关掉。`INITIAL_INTERVAL_DAYS` 本来就是 1 天。
+- 回退成本：低。
+- 影响范围：`app/api/v1/lessons.py`、D6。
+- 保障：变异 A（不补建）转红 6 条、变异 B（改成覆盖已有行）转红 2 条、
+  变异 D（建成立刻到期）转红 2 条、变异 E（用 DDL 默认 ease）与
+  变异 F（attempt_count 建成 1）各转红 1 条。
+
+## D-040 完课幂等，保留第一次的 `completed_at`
+
+- 日期：2026-09-19
+- 背景：学习者会重看已完成的课。第二次调用 complete 该怎么办，PRD 未定义。
+- 选择：`ON CONFLICT DO UPDATE ... WHERE status <> 'completed'`。
+  第二次调用什么也不改，返回的是第一次写下的时间，并带
+  `first_completion: false`。
+- 理由：重看一节课不等于「重新完成」了它。刷新时间戳会悄悄改写
+  「这个人是什么时候学到这里的」——而那正是 B 端月报（G4）与留存分析要读的东西。
+- 回退成本：低。
+- 影响范围：`app/api/v1/lessons.py`、G4。
+- 保障：变异 C（去掉 WHERE 条件）转红。
+
+## D-041 复习时长用 `IntEnum` 而不是 `Literal`，默认 10 分钟
+
+- 日期：2026-09-19
+- 背景：`REVIEW_DURATION_CHOICES = (5, 10, 15, 25)` 是 C3 定的常量。
+  查询参数怎么校验、不传时给多少，PRD 未定义。
+- 选择：查询参数类型是 `IntEnum`；不传时 10 分钟。
+- 理由：
+  - **`Literal[5, 10, 15, 25]` 看起来等价，实际全错**：查询串到达时是
+    `"10"`（字符串），pydantic 对 Literal 只做匹配不做转换，于是**每一个请求
+    都被拒**——包括合法值。而默认值本身是 int，所以不带参数的那条路径是通的。
+    第一版就是这么写的，31 条测试里只有用到 `?minutes=` 的那些转红。
+    **这类 bug 只在真实客户端第一次传参时才暴露。**
+  - **不读 `user_profiles.daily_goal_minutes`**：那是每日目标，取值不受
+    这四个选项约束（默认 10 恰好合法而已）。拿它当默认，等于用户改一下目标
+    就让这个端点开始报 422。
+  - 枚举重述了 `REVIEW_DURATION_CHOICES`（两种写法都没法从元组动态构造），
+    所以补了一条测试钉住两者相等。
+- 回退成本：低。
+- 影响范围：`app/api/v1/review.py`、F1（Mini App 的时长选择器）。
+- 保障：变异 I（忽略传入时长）转红 6 条；另有「四个合法值都通、五个非法值都 422」。
+
+## D-042 每概念复习时长是配置里的固定值
+
+- 日期：2026-09-19
+- 背景：`build_review_queue` 需要每个 concept 的预计耗时来切片，
+  而 C3 明确把它设计成**入参**：真实估算取决于该 concept 挂了多少 drill/vocab item，
+  那是 `lesson_items` 的事，领域层不该去 join。
+- 选择：新增 `REVIEW_ESTIMATED_SECONDS_PER_CONCEPT`（默认 60），API 层传给它。
+- 理由：C3 的 docstring 写明「今天会是一个固定值」。按 item 数实算需要
+  多一个 join，而且仍然要一个「每个 item 多少秒」的常数——同样是要标定的数字，
+  却多了一份复杂度。改成实算时只改这一个调用点，领域模块不动。
+- 回退成本：低。
+- 影响范围：`app/api/v1/review.py`、`core/config.py`。
+- 保障：变异 J（写死 60）转红——测试里配了 120 与 900 两个值。
+- 附带发现：`_load_candidates` 第一版的 docstring 说 inner join 是为了挡住
+  「concept 已从内容包删除、mastery 行还在」的情况。**为了证明它而写的测试
+  根本构造不出那个状态**：`concept_mastery.concept_id` 是外键且没有 ON DELETE，
+  数据库直接拒绝删除。docstring 已改成实情，测试改成钉住这条外键。
+  一句自信的解释，如果没人去验证，就会指导后面所有相关改动——
+  这和 C5 那次 DST docstring 写错是同一类。
+
 ---
 
 # 遗留约束
@@ -980,5 +1057,8 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 | L-4 | `docker-compose.yml` 把两个数据存储绑在 `0.0.0.0`，且 **Redis 完全没有密码**。仓库转 private 只解决 PostgreSQL 那一半（凭据不再公开），Redis 的暴露面与仓库可见性无关——同局域网内任何人都能直连。修法是绑回 loopback：`ports: ["127.0.0.1:6379:6379"]`。已与项目所有者确认**暂缓**。 | C 阶段 Redis 开始承载真实数据时 | 见 D-001；`docker-compose.yml` |
 | L-5 | `OBJECT_STORAGE_ENDPOINT` 与 `PUBLIC_MEDIA_BASE_URL` 仍为空，**`Settings` 中必须保持可选**。声明为必填会让全 fake 配置启动失败，直接违反 G-B 验收。 | BACKLOG E6 / E7（真实对象存储） | 见 D-002；`core/config.py` |
 | L-7 | **按当前默认参数，`ease_factor` 必然在 mastery 还很低的时候就触底，复习间隔长期停在 1 天。** 算一遍：drill 权重 0.6、`MASTERY_DELTA_BASE=40`、及格线 60，则满分一次只加 0.6 分，要爬到 `MASTERY_LOW`(60) 需要约 100 次；而在那之前每一次都落在「reset」带里，每次扣 0.2 ease，**6 次后就到 `SM2_EASE_MIN`(1.3)**。也就是说间隔重复在默认配置下几乎不生效。算法实现没错（PRD 9.2 原样如此，见 D-015/D-016），错的是参数标定。**M0-1 拿到真实分数分布后，必须连同 `MASTERY_DELTA_BASE` 与三个权重一起重新标定**，不要只调 `SCORING_PASS_THRESHOLD`。 | M0-1 结论落地时；或第一次有人问「为什么所有概念天天都要复习」 | `services/mastery/sm2.py` 的 `schedule_review`；`core/config.py` 的 `mastery_delta_base` |
+
+| L-8 | **`LIMIT_FREE_DAILY_TASKS`（Free 每日 3 个任务）至今没有任何消费者。** `consume_task()` 写好了、测过了，没人调用。原因是「一个任务」的口径未定：PRD 4.3 的表里像是「一节课」，而 4.1 的正文里「Bot 发出任务提示」像是「一道口语题」。这是计量口径，属于 CLAUDE.md 第 6 节必须问人的一类，不自行决定。**定了口径才能接**，否则 Free 档的这条限额等于不存在。 | BACKLOG D8a（付费墙），或更早——一旦有人问「Free 用户的每日 3 个任务在哪生效」 | `services/entitlements/quota.py` 的 `consume_task` |
+| L-9 | **`streaks` 表没有任何写入方。** 它只在 PRD 第 9 节的表清单里出现过一次，没有任何 BACKLOG 条目、没有行为规格。完课是它最自然的写入点，但那属于扩范围（CLAUDE.md R6），所以 D4 没做。**要么补规格要么删表**——一张永远为空的表，会让后面每个读它的人先花时间确认它是不是坏了。 | 有人要做连续打卡 / 留存激励时；或 M4 月报需要活跃度指标时 | `models/learning.py` 的 `Streak` |
 
 **处理完一条就把它从这张表里删掉**，并在对应的代码注释里说明已解决——留着一条已经不成立的约束，比没有这张表更糟。
