@@ -64,8 +64,13 @@ router = APIRouter(prefix="/attempts", tags=["learning"])
 _LANGUAGES: dict[str, Language] = {"zh": Language.ZH_CN, "en": Language.EN_US}
 
 #: Where the target sentence lives in lesson_items.payload. The pack schema is
-#: E1's to define; this is the key D3 reads and E4 must validate (D-036).
-TARGET_TEXT_KEY = "target_text"
+#: E1's to define; this is the field D3 reads and E4 must validate (D-036).
+#:
+#: Named ``_FIELD`` rather than ``_KEY``: a name ending in _KEY declares that it
+#: holds an i18n message key (bot/i18n_check.py enforces that they exist), and
+#: this is a JSONB field name. Two kinds of "key" that look identical is exactly
+#: what that convention is there to separate.
+TARGET_TEXT_FIELD = "target_text"
 
 #: Item types a learner can speak to. 'explain' is a lecture card.
 SCORABLE_ITEM_TYPES = frozenset({"drill", "vocab", "qa"})
@@ -325,11 +330,11 @@ def _reference_text(item: LessonItem) -> str:
             learner's — so it fails loudly here instead of degrading into an
             unscripted assessment nobody asked for (D-036).
     """
-    value = item.payload.get(TARGET_TEXT_KEY)
+    value = item.payload.get(TARGET_TEXT_FIELD)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(
             f"lesson_item {item.id} is {item.item_type!r} but its payload has no "
-            f"usable {TARGET_TEXT_KEY!r}; the pack should not have imported"
+            f"usable {TARGET_TEXT_FIELD!r}; the pack should not have imported"
         )
     return value
 

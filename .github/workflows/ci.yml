@@ -83,6 +83,15 @@ jobs:
         # dropping the schema guards.
         run: make check
 
+      - name: Report translation progress
+        # Deliberately not a gate. Every string is a placeholder until a native
+        # speaker writes the Khmer (PRD 15.3 item 3), and a build held red for
+        # weeks is a build somebody switches off. The structural half of the
+        # check — same keys in every locale, no unknown keys, no copy written in
+        # Python — runs inside `make check` above and does fail. The launch gate
+        # is `make i18n-strict`, which docs/DEFINITION_OF_DONE.md runs before M2.
+        run: make i18n
+
       - name: Self-check the shipped configuration
         # A different assertion from the test suite: this reads the real .env
         # rather than one a test constructed, so it proves the template we tell

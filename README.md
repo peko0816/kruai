@@ -26,6 +26,9 @@ make check                    # lint + format + mypy strict + pytest
 | `make fmt` | 格式化（写入） |
 | `make migrate` | `alembic upgrade head` |
 | `make run` | 启动 API（`uvicorn --factory app.main:create_app`） |
+| `make bot` | 启动 Telegram Bot（需先 `make run`） |
+| `make i18n` | 报告还有多少条翻译没写（不阻断） |
+| `make i18n-strict` | 上线闸门：还有占位符就失败 |
 | `make sync` | 同步依赖 |
 
 没起数据库时，schema 一致性的集成测试会跳过并提示；CI 里则会直接失败，不允许静默跳过。

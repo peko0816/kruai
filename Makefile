@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot i18n i18n-strict clean
 
 help:
 	@echo "KruAI make targets:"
@@ -21,6 +21,8 @@ help:
 	@echo "  make migrate    alembic upgrade head (available after A4)"
 	@echo "  make run        uvicorn --factory app.main:create_app --reload"
 	@echo "  make bot        run the Telegram bot against a running API"
+	@echo "  make i18n       report how many translations are still placeholders"
+	@echo "  make i18n-strict  fail while any translation is missing (the launch gate)"
 
 sync:
 	$(UV) sync --directory $(BACKEND) --all-groups
@@ -55,9 +57,23 @@ migrate:
 run:
 	$(UV_RUN) uvicorn --factory app.main:create_app --reload
 
+# `uv run --directory backend` moves the working directory, so the repository
+# root has to be on the path for `bot` to import. pytest gets the same thing
+# from `pythonpath` in pyproject.toml.
+BOT_RUN := PYTHONPATH=$(CURDIR) $(UV_RUN) python
+
 # Needs TELEGRAM_BOT_TOKEN in .env and `make run` already serving the API.
 bot:
-	$(UV_RUN) python -m bot.main
+	$(BOT_RUN) -m bot.main
+
+# Reports how much of the catalogue is still waiting for a translator. Never
+# fails on that count: see bot/i18n_check.py on why it is a launch gate.
+i18n:
+	$(BOT_RUN) -m bot.i18n_check
+
+# The launch gate itself. docs/DEFINITION_OF_DONE.md runs this before M2.
+i18n-strict:
+	$(BOT_RUN) -m bot.i18n_check --strict
 
 clean:
 	rm -rf $(BACKEND)/.venv $(BACKEND)/.mypy_cache $(BACKEND)/.pytest_cache $(BACKEND)/.ruff_cache
