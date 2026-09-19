@@ -117,21 +117,25 @@ class KruaiApi:
 
     # -------------------------------------------------------------- content
 
-    async def first_lesson_id(self, token: str) -> uuid.UUID | None:
-        """The opening lesson of the first course on offer.
+    async def next_lesson_id(self, token: str) -> uuid.UUID | None:
+        """The lesson this learner should do now, as the server decides it.
 
-        A placeholder for choosing: the catalogue is one HSK1 course at M2, and
-        picking up where a learner left off needs progress the API does not
-        expose yet. Deliberately not guessed at here — a wrong guess would be a
-        business decision made in the entry layer.
+        Not the first of the list. Taking lessons[0] is what left a learner
+        being offered lesson one forever after finishing it — the list is the
+        course, and the course does not know who is asking (D-057). None means
+        either no content at all or everything finished; the caller says which
+        by whether a course existed.
         """
         courses = await self._get("/api/v1/courses", token=token)
         if not courses:
             return None
-        lessons = await self._get(f"/api/v1/courses/{courses[0]['id']}/lessons", token=token)
-        if not lessons:
-            return None
-        return uuid.UUID(lessons[0]["id"])
+        body = await self._get(f"/api/v1/courses/{courses[0]['id']}/lessons", token=token)
+        found = body.get("next_lesson_id")
+        return uuid.UUID(found) if found else None
+
+    async def has_courses(self, token: str) -> bool:
+        """Whether there is any content at all, as opposed to none left to do."""
+        return bool(await self._get("/api/v1/courses", token=token))
 
     async def lesson(self, token: str, lesson_id: uuid.UUID) -> Lesson:
         """One lesson, already shaped for the conversation.

@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
 from app.core.config import Settings
-from app.core.errors import ContentNotFound
+from app.core.errors import ContentNotFound, LessonNotStarted
 from app.core.logging import get_logger
 from app.models.content import Course, Lesson, LessonItem, MediaAsset
 from app.models.learning import ConceptMastery, LessonProgress
@@ -126,8 +126,13 @@ async def get_lesson(
     Raises:
         ContentNotFound: no such lesson, or one belonging to a course this
             endpoint does not serve (see courses.py on org scoping).
+        LessonNotStarted: the learner has not opened this lesson. The contents
+            are the lesson, so handing them over without a start would make the
+            daily task allowance a thing clients enforce on themselves — which
+            is precisely what ARCHITECTURE section 1 forbids.
     """
     lesson = await _load_lesson(session, lesson_id)
+    await _require_started(session, user_id=user_id, lesson_id=lesson_id)
     viewer = await _load_viewer(
         session, session_factory=session_factory, settings=settings, user_id=user_id
     )
@@ -294,9 +299,12 @@ async def complete_lesson(
 
     Raises:
         ContentNotFound: no such lesson, or one behind an organisation course.
+        LessonNotStarted: nobody opened it. Completing a lesson that was never
+            started would write progress for work the allowance never covered.
     """
     now = datetime.datetime.now(datetime.UTC)
     lesson = await _load_lesson(session, lesson_id)
+    await _require_started(session, user_id=user_id, lesson_id=lesson_id)
 
     completed_at, first_completion = await _mark_completed(
         session, user_id=user_id, lesson_id=lesson_id, now=now
@@ -501,3 +509,26 @@ async def _timezone_of(session: AsyncSession, user_id: uuid.UUID) -> str | None:
     )
     timezone: str | None = stored.scalar_one_or_none()
     return timezone
+
+
+async def _require_started(
+    session: AsyncSession, *, user_id: uuid.UUID, lesson_id: uuid.UUID
+) -> None:
+    """Refuse a learner who never opened this lesson.
+
+    The point is not bookkeeping. Starting is what spends a task (D-054), and
+    before this check a learner with no tasks left could be refused at the door
+    and then read the whole lesson and mark it complete anyway — the allowance
+    held only for clients that volunteered to ask. Found by probing the built
+    endpoints rather than by a test, which is why there are now tests.
+
+    Raises:
+        LessonNotStarted: no lesson_progress row.
+    """
+    stored = await session.execute(
+        sa.select(LessonProgress.status).where(
+            LessonProgress.user_id == user_id, LessonProgress.lesson_id == lesson_id
+        )
+    )
+    if stored.scalar_one_or_none() is None:
+        raise LessonNotStarted(lesson_id=str(lesson_id))

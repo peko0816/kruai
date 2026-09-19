@@ -107,6 +107,8 @@
 | `PRICE_BASIC_YEARLY` | `USD:1800` | |
 | `PRICE_PRO_MONTHLY` | `USD:599` | |
 | `PRICE_PRO_YEARLY` | `USD:5400` | |
+| `PAYMENT_RECONCILE_AFTER_MINUTES` | `10` | 回调丢失兜底：pending 超过此时长就主动查单 |
+| `PAYMENT_ABANDON_AFTER_HOURS` | `24` | 仍为 pending 就判定为放弃，置 failed |
 
 > 价格是**最小货币单位的整数**：199 = $1.99，8000 = ៛8000。KHR 没有小数位，
 > 所以这里永远不会出现「分」。`SUPPORTED_CURRENCIES` 里列了却没定价的币种，
