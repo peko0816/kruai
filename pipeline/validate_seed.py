@@ -27,6 +27,9 @@ _ROOT: Final = Path(__file__).resolve().parents[1]
 #: Where seed files live when no path is given (ARCHITECTURE section 6).
 SEED_ROOT: Final = _ROOT / "pipeline" / "seed"
 
+#: How many pending slugs to name before summarising the rest.
+_SLUGS_SHOWN: Final = 5
+
 
 def check(paths: list[Path]) -> SeedCorpus:
     """Validate every given file, and every seed file under every given directory."""
@@ -53,7 +56,12 @@ def report(corpus: SeedCorpus, *, strict: bool) -> int:
     print(f"{len(corpus.files)} seed file(s), {corpus.concept_count} concept(s)")
 
     for path, slugs in corpus.awaiting_translation.items():
-        print(f"{path}: {len(slugs)} concept(s) awaiting a Khmer explanation: {list(slugs)}")
+        # Truncated: a whole level is 48 concepts and printing all of them
+        # buries the count, which is the number anybody actually reads. The
+        # full list is what the review export is for.
+        shown = ", ".join(slugs[:_SLUGS_SHOWN])
+        more = f", and {len(slugs) - _SLUGS_SHOWN} more" if len(slugs) > _SLUGS_SHOWN else ""
+        print(f"{path}: {len(slugs)} concept(s) awaiting a Khmer explanation: {shown}{more}")
 
     if corpus.problems:
         return 1

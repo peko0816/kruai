@@ -46,6 +46,7 @@ def a_seed() -> dict[str, Any]:
         "concepts": [
             {
                 "slug": "zh.hsk1.want_noun",
+                "standard_ref": "一03",
                 "pattern": "我要 + [名词]",
                 "km_explanation": "[[km:concept.zh.hsk1.want_noun]]",
                 "hskk_task_types": ["listen_and_repeat"],
@@ -171,7 +172,7 @@ def test_a_slug_from_another_language_is_refused() -> None:
 def test_two_concepts_with_the_same_slug_are_refused() -> None:
     document = a_seed()
     document["concepts"].append(deepcopy(document["concepts"][0]))
-    document["concepts"][1]["sort_order"] = 20
+    document["concepts"][1].update(sort_order=20, standard_ref="一37")
 
     assert "concepts[1].slug" in rendered(refuse(document))
 
@@ -180,10 +181,47 @@ def test_two_concepts_claiming_the_same_position_are_refused() -> None:
     """Otherwise teaching order is whatever the database happens to return."""
     document = a_seed()
     second = deepcopy(document["concepts"][0])
-    second["slug"] = "zh.hsk1.have_noun"
+    second.update(slug="zh.hsk1.have_noun", standard_ref="一37")
     document["concepts"].append(second)
 
     assert "concepts[1].sort_order" in rendered(refuse(document))
+
+
+@pytest.mark.parametrize("ref", ["1", "一1", "一001", "A01", "一0a"])
+def test_a_malformed_syllabus_reference_is_refused_by_name(ref: str) -> None:
+    document = a_seed()
+    document["concepts"][0]["standard_ref"] = ref
+
+    assert "concepts[0].standard_ref" in fields(refuse(document))
+
+
+def test_a_concept_may_omit_the_syllabus_reference() -> None:
+    """Not every source numbers its items; the BCT scenario list does not."""
+    document = a_seed()
+    document["concepts"][0].pop("standard_ref", None)
+
+    assert parse_seed(document, origin=ORIGIN).concepts[0].standard_ref == ""
+
+
+def test_two_concepts_claiming_the_same_syllabus_item_are_refused() -> None:
+    """Otherwise a copy-paste silently drops one grammar point from the level."""
+    document = a_seed()
+    document["concepts"][0]["standard_ref"] = "一01"
+    second = deepcopy(document["concepts"][0])
+    second.update(slug="zh.hsk1.have_noun", sort_order=20)
+    document["concepts"].append(second)
+
+    assert "concepts[1].standard_ref" in rendered(refuse(document))
+
+
+def test_concepts_without_a_syllabus_reference_do_not_collide() -> None:
+    document = a_seed()
+    document["concepts"][0].pop("standard_ref")
+    second = deepcopy(document["concepts"][0])
+    second.update(slug="zh.hsk1.have_noun", sort_order=20)
+    document["concepts"].append(second)
+
+    assert len(parse_seed(document, origin=ORIGIN).concepts) == 2
 
 
 def test_a_negative_sort_order_is_refused() -> None:

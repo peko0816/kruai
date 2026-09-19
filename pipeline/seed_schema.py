@@ -88,6 +88,11 @@ _SLUG = re.compile(r"^[a-z]{2}\.[a-z0-9]+\.[a-z0-9_]+$")
 
 _LEVEL = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,15}$")
 
+#: ``一01``: the level in Chinese numerals, then a two-digit item number, the
+#: way GF 0025-2021 appendix A writes it. Checked for shape only — whether item
+#: 一49 exists is a question about the syllabus, not about the string.
+_STANDARD_REF = re.compile(r"^[一二三四五六七八九][0-9]{2}$")
+
 #: Levels of the standard V1 teaches against (PRD 5.1: three stages, nine
 #: levels). Restricted for ``zh`` only; other languages grade differently.
 _ZH_LEVEL = re.compile(r"^HSK[1-9]$")
@@ -154,6 +159,14 @@ class SeedConcept(BaseModel):
 
     slug: str
     pattern: str = Field(min_length=1)
+    #: Which numbered item of the syllabus this concept implements, as that
+    #: document writes it: ``一01`` is the first level-1 grammar point of
+    #: GF 0025-2021 appendix A. Optional, because not every source is a
+    #: numbered list — the BCT scenario list is not — but where the source does
+    #: number its items, carrying the number is what makes "have we covered the
+    #: whole level?" a question a test can answer instead of one somebody
+    #: counts by hand (D-082).
+    standard_ref: str = ""
     #: Khmer prose, or a ``[[km:...]]`` placeholder. Never English.
     km_explanation: str = Field(min_length=1)
     hskk_task_types: tuple[HskkTaskType, ...] = ()
@@ -177,6 +190,13 @@ class SeedConcept(BaseModel):
                 f"{value!r} is not a slug: expected language.level.name, "
                 f"lower case, e.g. 'zh.hsk1.want_noun'"
             )
+        return value
+
+    @field_validator("standard_ref")
+    @classmethod
+    def _standard_ref_shape(cls, value: str) -> str:
+        if value and not _STANDARD_REF.match(value):
+            raise ValueError(f"{value!r} is not a syllabus item number, e.g. '一01'")
         return value
 
     @field_validator("pattern")
@@ -291,6 +311,12 @@ class SeedFile(BaseModel):
                 )
 
         _reject_repeats("slug", [(index, c.slug) for index, c in enumerate(self.concepts)])
+        # Blank ones are skipped: "no syllabus number" is not a value that can
+        # collide with another concept's lack of one.
+        _reject_repeats(
+            "standard_ref",
+            [(index, c.standard_ref) for index, c in enumerate(self.concepts) if c.standard_ref],
+        )
         _reject_repeats(
             "sort_order", [(index, c.sort_order) for index, c in enumerate(self.concepts)]
         )
