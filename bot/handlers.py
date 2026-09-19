@@ -30,7 +30,11 @@ log = get_logger(__name__)
 #: Error codes the API can answer with that the learner is told about in their
 #: own words. Anything else becomes the generic failure message — a learner
 #: should never be shown an internal code.
-_ERROR_MESSAGES: Final[dict[str, str]] = {
+#:
+#: Named ``_KEYS`` because its values are message keys, which is the convention
+#: bot/i18n_check.py uses to find them: an error code and a message key are the
+#: same shape and only one of them lives in locales/.
+_ERROR_MESSAGE_KEYS: Final[dict[str, str]] = {
     "quota.insufficient": "bot.quota_exhausted",
     "scoring.unavailable": "bot.scoring_unavailable",
     "attempt.item_not_scorable": "bot.error",
@@ -200,7 +204,7 @@ class Conversation:
             # re-authenticates rather than repeating the same failure.
             self._api.forget(learner.telegram_id)
 
-        key = _ERROR_MESSAGES.get(exc.code or "", "bot.error")
+        key = _ERROR_MESSAGE_KEYS.get(exc.code or "", "bot.error")
         log.warning(
             "bot.api_error",
             telegram_id=learner.telegram_id,
