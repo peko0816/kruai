@@ -41,8 +41,8 @@ from app.core.config import Plan, Settings
 from app.core.errors import PaymentRefused
 from app.core.logging import get_logger
 from app.core.money import format_money
-from app.models.commerce import Payment
-from app.services.entitlements import Entitlements
+from app.models.commerce import Payment, Subscription
+from app.services.entitlements import ENTITLING_STATUSES, Entitlements
 from app.services.entitlements.pricing import (
     BILLING_PERIODS,
     PURCHASABLE_PLANS,
@@ -52,13 +52,14 @@ from app.services.entitlements.pricing import (
 )
 from app.services.payments.base import (
     CheckoutRequest,
+    Money,
     PaymentProvider,
     PaymentStatus,
     ProductKind,
 )
 from app.services.payments.registry import get_payment_provider, provider_for_currency
 from app.services.provider_errors import ProviderConfigurationError
-from app.services.subscriptions import ORDER_DETAILS_FIELD, settle_order
+from app.services.subscriptions import MANDATE_FIELD, ORDER_DETAILS_FIELD, settle_order
 
 log = get_logger(__name__)
 
@@ -127,6 +128,7 @@ async def create_checkout(
     now = datetime.datetime.now(datetime.UTC)
     currency = (payload.currency or settings.default_currency).upper()
     _check_currency(currency, settings=settings)
+    await _refuse_if_already_subscribed(session, user_id=user_id)
 
     if payload.plan not in PURCHASABLE_PLANS:
         raise PaymentRefused(reason="plan_not_purchasable", plan=payload.plan)
@@ -188,7 +190,18 @@ async def create_checkout(
     await session.execute(
         sa.update(Payment)
         .where(Payment.order_id == order_id)
-        .values(provider_ref=result.provider_ref, updated_at=now)
+        .values(
+            provider_ref=result.provider_ref,
+            updated_at=now,
+            # Kept because the callback is not the only way this order can be
+            # settled: reconciliation has no mandate to hand over, and without
+            # this an order whose callback was lost would quietly renew by
+            # reminder instead of by charge (D-066).
+            raw_payload={
+                ORDER_DETAILS_FIELD: {"plan": payload.plan, "period": payload.period},
+                MANDATE_FIELD: result.mandate_ref,
+            },
+        )
     )
     await session.commit()
 
@@ -270,6 +283,7 @@ async def receive_webhook(
         provider_ref=callback.provider_ref,
         mandate_ref=callback.mandate_ref,
         raw=callback.raw,
+        paid=callback.money,
     )
     log.info(
         "payments.webhook_settled",
@@ -281,6 +295,31 @@ async def receive_webhook(
 
 
 # ------------------------------------------------------------------ internals
+
+
+async def _refuse_if_already_subscribed(session: AsyncSession, *, user_id: uuid.UUID) -> None:
+    """One live subscription at a time.
+
+    Without this a learner on Basic who buys Pro ends up holding both, and
+    **both renew forever** — two charges a month for one account, which nothing
+    in the system would ever notice. Upgrading is a real need and a real
+    product decision (what happens to the days already paid for), so it is not
+    guessed at here: the purchase is refused until somebody decides
+    (docs/DECISIONS.md D-065).
+
+    Raises:
+        PaymentRefused: an active or grace subscription already exists.
+    """
+    existing = await session.execute(
+        sa.select(Subscription.plan).where(
+            Subscription.user_id == user_id,
+            Subscription.status.in_(ENTITLING_STATUSES),
+        )
+    )
+    held = existing.scalars().first()
+    if held is not None:
+        log.info("payments.already_subscribed", user_id=str(user_id), plan=held)
+        raise PaymentRefused(reason="already_subscribed", plan=held)
 
 
 def _check_currency(currency: str, *, settings: Settings) -> None:
@@ -333,6 +372,7 @@ async def _settle(
     provider_ref: str | None,
     mandate_ref: str | None,
     raw: dict[str, Any],
+    paid: Money | None,
 ) -> bool:
     """Grant what the order bought, exactly once.
 
@@ -348,6 +388,7 @@ async def _settle(
         provider_ref=provider_ref,
         mandate_ref=mandate_ref,
         raw=raw,
+        paid=paid,
         settings=settings,
         now=now,
     )

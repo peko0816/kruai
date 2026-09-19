@@ -23,7 +23,7 @@ from app.core.config import Settings
 from app.core.security import decode_access_token
 from app.services.payments.fake import SIGNATURE_HEADER, sign_payload
 from app.services.provider_errors import ProviderConfigurationError
-from tests.integration.conftest import Rows, auth_header, client_for, token_for
+from tests.integration.conftest import Execute, Rows, auth_header, client_for, token_for
 
 pytestmark = pytest.mark.integration
 
@@ -218,6 +218,50 @@ async def test_checkout_needs_a_token(client: httpx.AsyncClient) -> None:
     assert (await client.post(CHECKOUT_URL, json={"plan": "basic"})).status_code == 401
 
 
+async def test_a_learner_cannot_buy_a_second_subscription(
+    client: httpx.AsyncClient, rows: Rows
+) -> None:
+    """Both would renew forever: two charges a month for one account, and
+    nothing in the system would ever notice (D-065)."""
+    headers = await authenticated(client)
+    await pay_for(client, headers=headers, plan="basic")
+
+    response = await checkout(client, headers=headers, plan="pro", period="yearly")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "payment.refused"
+    assert rows("SELECT count(*) FROM subscriptions") == [(1,)]
+    assert rows("SELECT count(*) FROM payments") == [(1,)], "the second order was never recorded"
+
+
+async def test_a_learner_in_grace_cannot_start_a_second_subscription(
+    client: httpx.AsyncClient, execute: Execute, rows: Rows
+) -> None:
+    """Grace still entitles, so it is still a live subscription."""
+    headers = await authenticated(client)
+    await pay_for(client, headers=headers, plan="basic")
+    execute("UPDATE subscriptions SET status = 'grace', grace_until = now() + interval '2 days'")
+
+    response = await checkout(client, headers=headers, plan="basic")
+
+    assert response.status_code == 400
+    assert rows("SELECT count(*) FROM subscriptions") == [(1,)]
+
+
+async def test_a_learner_whose_subscription_expired_can_buy_again(
+    client: httpx.AsyncClient, execute: Execute, rows: Rows
+) -> None:
+    """Refusing them would be refusing the renewal the manual path exists for."""
+    headers = await authenticated(client)
+    await pay_for(client, headers=headers, plan="basic")
+    execute("UPDATE subscriptions SET status = 'expired'")
+
+    response = await checkout(client, headers=headers, plan="basic")
+
+    assert response.status_code == 201
+    assert rows("SELECT count(*) FROM payments") == [(2,)]
+
+
 # ------------------------------------------------------------------ webhook
 
 
@@ -336,6 +380,73 @@ async def test_an_unknown_provider_is_refused(client: httpx.AsyncClient) -> None
     )
 
     assert response.status_code == 400
+
+
+async def test_a_callback_naming_a_different_amount_grants_nothing(
+    client: httpx.AsyncClient, rows: Rows
+) -> None:
+    """Correctly signed, and about an amount the order never asked for.
+
+    The signature proves who sent it, not that they sent the right thing.
+    Partial payments and adjusted amounts are real, and a year of Pro against
+    one cent is not a rounding error (D-067).
+    """
+    headers = await authenticated(client)
+    order_id = (await checkout(client, headers=headers, plan="pro", period="yearly")).json()[
+        "order_id"
+    ]
+
+    response = await deliver(
+        client,
+        callback_body(order_id, amount_minor=1, currency="USD", currency_minor_units=2),
+    )
+
+    assert response.status_code == 200, "nothing to retry; the amount will not change"
+    assert rows("SELECT count(*) FROM subscriptions") == [(0,)]
+    assert rows("SELECT status FROM payments") == [("pending",)]
+
+
+async def test_a_callback_naming_the_right_amount_settles(
+    client: httpx.AsyncClient, rows: Rows
+) -> None:
+    headers = await authenticated(client)
+    order_id = (await checkout(client, headers=headers, plan="pro", period="yearly")).json()[
+        "order_id"
+    ]
+
+    await deliver(
+        client,
+        callback_body(order_id, amount_minor=5400, currency="USD", currency_minor_units=2),
+    )
+
+    assert rows("SELECT plan FROM subscriptions") == [("pro",)]
+
+
+async def test_a_callback_naming_a_different_currency_grants_nothing(
+    client: httpx.AsyncClient, rows: Rows
+) -> None:
+    """199 riel and 199 cents are the same integer and nothing like the same
+    money — the exact confusion amount_minor exists to prevent."""
+    headers = await authenticated(client)
+    order_id = (await checkout(client, headers=headers, plan="basic")).json()["order_id"]
+
+    await deliver(
+        client,
+        callback_body(order_id, amount_minor=199, currency="KHR", currency_minor_units=0),
+    )
+
+    assert rows("SELECT count(*) FROM subscriptions") == [(0,)]
+
+
+async def test_a_silent_acquirer_is_still_believed(client: httpx.AsyncClient, rows: Rows) -> None:
+    """Plenty of callbacks carry no amount. Refusing those would break
+    settlement for a channel that is behaving."""
+    headers = await authenticated(client)
+    order_id = (await checkout(client, headers=headers, plan="basic")).json()["order_id"]
+
+    await deliver(client, callback_body(order_id))
+
+    assert rows("SELECT plan FROM subscriptions") == [("basic",)]
 
 
 async def test_the_acquirer_payload_is_kept_beside_our_order(
