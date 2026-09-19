@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
 from app.core.config import Plan, Settings
-from app.core.errors import PaymentRefused
+from app.core.errors import AlreadySubscribed, PaymentRefused
 from app.core.logging import get_logger
 from app.core.money import format_money
 from app.models.commerce import Payment, Subscription
@@ -308,7 +308,7 @@ async def _refuse_if_already_subscribed(session: AsyncSession, *, user_id: uuid.
     (docs/DECISIONS.md D-065).
 
     Raises:
-        PaymentRefused: an active or grace subscription already exists.
+        AlreadySubscribed: an active or grace subscription already exists.
     """
     existing = await session.execute(
         sa.select(Subscription.plan).where(
@@ -319,7 +319,7 @@ async def _refuse_if_already_subscribed(session: AsyncSession, *, user_id: uuid.
     held = existing.scalars().first()
     if held is not None:
         log.info("payments.already_subscribed", user_id=str(user_id), plan=held)
-        raise PaymentRefused(reason="already_subscribed", plan=held)
+        raise AlreadySubscribed(plan=held)
 
 
 def _check_currency(currency: str, *, settings: Settings) -> None:

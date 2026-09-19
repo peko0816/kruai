@@ -156,6 +156,20 @@ class PaymentRefused(AppError):
     http_status = 400
 
 
+class AlreadySubscribed(AppError):
+    """A live subscription already exists for this learner.
+
+    Its own code rather than the general payment refusal, because it is the one
+    refusal a client can act on: today by saying "you already have a plan", and
+    later by offering the upgrade that BACKLOG D11 will add. That upgrade flow
+    replaces this branch, so giving it a name now is what keeps the replacement
+    from being a search through log strings (docs/DECISIONS.md D-065).
+    """
+
+    code = "payment.already_subscribed"
+    http_status = 409
+
+
 class InsufficientQuota(AppError):
     """Daily attempt / task allowance or realtime seconds exhausted."""
 
