@@ -12,6 +12,9 @@ One directory per source family, matching ARCHITECTURE section 6:
 | `zh-bct/` | B-side job packs (hotel front desk first). | BCT scenario list, M4 |
 | `en-gse/` | English, v2. Seed may accumulate now; nothing builds it. | GSE Teacher Toolkit, CEFR |
 
+`zh-hsk3.0/hsk1.yaml` is the worked example: 48 concepts, one per level-1
+grammar point of GF 0025-2021 appendix A.
+
 Validate before committing:
 
 ```bash
@@ -40,6 +43,8 @@ meta:
 
 concepts:
   - slug: zh.hsk1.want_noun   # language.level.name — must match meta
+    standard_ref: 一03          # which numbered syllabus item this is; optional,
+                                # unique within the file, e.g. GF 0025-2021 A.1
     pattern: "我要 + [名词]"
     # Khmer (U+1780-U+17FF), or this placeholder until a native speaker
     # writes it. Never English: English here is untranslated text that
