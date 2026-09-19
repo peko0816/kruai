@@ -1,0 +1,526 @@
+# HSK1 concept skeletons — BACKLOG E2.
+#
+# One concept per level-1 grammar point of 《国际中文教育中文水平等级标准》
+# (GF 0025-2021) appendix A, which numbers them 一01 through 一48 and then
+# moves on to level 2. That list is closed, so "is HSK1 complete?" is a
+# question a test can answer: pipeline/tests/test_seed_hsk1.py asserts this
+# file carries all 48 and nothing else (docs/DECISIONS.md D-082).
+#
+# The mapping is deliberately one-to-one rather than curated. Some items are
+# sentence-constituent descriptions rather than things a learner drills
+# (一24 "a noun can be the subject"), and a few overlap (一21 and 一41 are both
+# 了₁). Merging them would make the file read better and would make coverage
+# unprovable, which is the wrong trade at seed time — choosing what goes into
+# a lesson happens later, from lessons.concept_ids, not here.
+#
+# km_explanation is a placeholder throughout: generate.py drafts the Khmer and
+# a native speaker reviews it (D-081). English must never appear in that field.
+#
+# common_l1_errors is empty on purpose. PRD 3.2 says those come from人工 input
+# and attempt data; inventing Khmer-L1 error pairs without a Khmer speaker
+# would put invented teaching content in front of learners.
+#
+# hskk_task_types follows one stated rule (D-083):
+#   · every level-1 point can turn up in a 听后重复 sentence  -> listen_and_repeat
+#   · the question forms (一04 一33 一45-一48)                -> + listen_and_answer
+#                                                              + answer_questions
+#   · patterns that stand alone as a spoken answer            -> + listen_and_answer
+# Confirm the mapping once during the M1 content review.
+
+schema_version: 1
+
+meta:
+  language: zh
+  level: HSK1
+  licence: >-
+    Concept skeletons derived from public national standards and examination
+    syllabuses. No publisher textbook material (PRD 5.5).
+  sources:
+    - id: zh.standard.2021
+      detail: >-
+        附录A 语法等级大纲, A.1 一级语法点 (items 一01-一48), including the
+        example sentences quoted under each item.
+    - id: zh.hskk.syllabus
+      detail: HSKK 初级 task types (听后重复 / 听后回答 / 回答问题).
+
+concepts:
+
+  - slug: zh.hsk1.locative_nouns
+    standard_ref: 一01
+    pattern: "[名词] + 上/下/里/外/前/后/东边/南边…"
+    km_explanation: "[[km:concept.zh.hsk1.locative_nouns]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "书在桌子上。"
+      - "房间里没有人。"
+    sort_order: 10
+
+  - slug: zh.hsk1.modal_can
+    standard_ref: 一02
+    pattern: "会 / 能 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.modal_can]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我不会说中文。"
+      - "明天你能来吗？"
+    sort_order: 20
+
+  - slug: zh.hsk1.modal_want
+    standard_ref: 一03
+    pattern: "想 / 要 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.modal_want]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我想学中文。"
+      - "他要去书店。"
+    sort_order: 30
+
+  - slug: zh.hsk1.question_pronouns
+    standard_ref: 一04
+    pattern: "多 / 多少 / 几 / 哪 / 哪儿 / 哪里 / 哪些 / 什么 / 谁 / 怎么 + […]"
+    km_explanation: "[[km:concept.zh.hsk1.question_pronouns]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
+    example_sentences:
+      - "他多大？"
+      - "你们去哪儿？"
+    sort_order: 40
+
+  - slug: zh.hsk1.personal_pronouns
+    standard_ref: 一05
+    pattern: "我 / 你 / 您 / 他 / 她 / 我们 / 你们 / 他们 / 她们"
+    km_explanation: "[[km:concept.zh.hsk1.personal_pronouns]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "他想喝水。"
+      - "她们是我的同学。"
+    sort_order: 50
+
+  - slug: zh.hsk1.demonstrative_pronouns
+    standard_ref: 一06
+    pattern: "这 / 那 / 这儿 / 那儿 / 这里 / 那里 / 这些 / 那些 / 别的 / 有的 + […]"
+    km_explanation: "[[km:concept.zh.hsk1.demonstrative_pronouns]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "这是谁的手机？"
+      - "这些书很新。"
+    sort_order: 60
+
+  - slug: zh.hsk1.numerals
+    standard_ref: 一07
+    pattern: "一~一百；零、半"
+    km_explanation: "[[km:concept.zh.hsk1.numerals]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "两个人"
+      - "八点半"
+    sort_order: 70
+
+  - slug: zh.hsk1.measure_words
+    standard_ref: 一08
+    pattern: "[数词] + 杯/本/个/家/间/口/块/页 + [名词]"
+    km_explanation: "[[km:concept.zh.hsk1.measure_words]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "两杯牛奶"
+      - "三本书"
+    sort_order: 80
+
+  - slug: zh.hsk1.degree_adverbs
+    standard_ref: 一09
+    pattern: "非常 / 很 / 太 / 真 / 最 + [形容词]"
+    km_explanation: "[[km:concept.zh.hsk1.degree_adverbs]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我非常喜欢这本书。"
+      - "这里太冷了。"
+    sort_order: 90
+
+  - slug: zh.hsk1.scope_adverbs
+    standard_ref: 一10
+    pattern: "都 / 一块儿 / 一起 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.scope_adverbs]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "同学们都很认真。"
+      - "明天他们一起去图书馆。"
+    sort_order: 100
+
+  - slug: zh.hsk1.time_adverbs
+    standard_ref: 一11
+    pattern: "马上 / 先 / 有时 / 在 / 正 / 正在 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.time_adverbs]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "医生马上来。"
+      - "他们正在唱歌。"
+    sort_order: 110
+
+  - slug: zh.hsk1.frequency_adverbs
+    standard_ref: 一12
+    pattern: "常 / 常常 / 再 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.frequency_adverbs]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "他常去饭店吃饭。"
+      - "她常常不吃早饭。"
+    sort_order: 120
+
+  - slug: zh.hsk1.linking_adverbs
+    standard_ref: 一13
+    pattern: "还 / 也 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.linking_adverbs]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "他要去上海，还要去北京。"
+      - "他是学生，我也是学生。"
+    sort_order: 130
+
+  - slug: zh.hsk1.negation_adverbs
+    standard_ref: 一14
+    pattern: "别 / 不 / 没 / 没有 + [动词/形容词]"
+    km_explanation: "[[km:concept.zh.hsk1.negation_adverbs]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "今天不热。"
+      - "他昨天没上课。"
+    sort_order: 140
+
+  - slug: zh.hsk1.prep_cong
+    standard_ref: 一15
+    pattern: "从 + [时间/处所]"
+    km_explanation: "[[km:concept.zh.hsk1.prep_cong]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "我们从星期一到星期五工作。"
+      - "你从哪儿来？"
+    sort_order: 150
+
+  - slug: zh.hsk1.prep_zai
+    standard_ref: 一16
+    pattern: "在 + [时间/处所]"
+    km_explanation: "[[km:concept.zh.hsk1.prep_zai]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "哥哥在北京学中文。"
+      - "他在手机上看电影。"
+    sort_order: 160
+
+  - slug: zh.hsk1.prep_gen_he
+    standard_ref: 一17
+    pattern: "跟 / 和 + [对象] + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.prep_gen_he]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "他跟老师请假了。"
+      - "我没和姐姐一起去中国。"
+    sort_order: 170
+
+  - slug: zh.hsk1.prep_bi
+    standard_ref: 一18
+    pattern: "A + 比 + B + [形容词]"
+    km_explanation: "[[km:concept.zh.hsk1.prep_bi]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "哥哥比弟弟高。"
+      - "这个房间比那个房间大。"
+    sort_order: 180
+
+  - slug: zh.hsk1.conjunctions
+    standard_ref: 一19
+    pattern: "A + 跟 / 和 / 还是 + B"
+    km_explanation: "[[km:concept.zh.hsk1.conjunctions]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "你喝茶还是喝水？"
+      - "我和弟弟都学习中文。"
+    sort_order: 190
+
+  - slug: zh.hsk1.structural_particles
+    standard_ref: 一20
+    pattern: "[定语] + 的 + [名词]；[状语] + 地 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.structural_particles]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "你的衣服很好看。"
+      - "他高兴地说：“我明天回家。”"
+    sort_order: 200
+
+  - slug: zh.hsk1.aspect_particle_le1
+    standard_ref: 一21
+    pattern: "[动词] + 了 + [宾语]"
+    km_explanation: "[[km:concept.zh.hsk1.aspect_particle_le1]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "他买了一本书。"
+      - "我写了两个汉字。"
+    sort_order: 210
+
+  - slug: zh.hsk1.modal_particles
+    standard_ref: 一22
+    pattern: "[句子] + 吧 / 了 / 吗 / 呢"
+    km_explanation: "[[km:concept.zh.hsk1.modal_particles]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "我们走吧。"
+      - "他是哪国人呢？"
+    sort_order: 220
+
+  - slug: zh.hsk1.numeral_measure_phrase
+    standard_ref: 一23
+    pattern: "[数词] + [量词]"
+    km_explanation: "[[km:concept.zh.hsk1.numeral_measure_phrase]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "一个"
+      - "两杯"
+    sort_order: 230
+
+  - slug: zh.hsk1.subject_noun
+    standard_ref: 一24
+    pattern: "[名词/代词/名词性短语] + [谓语]"
+    km_explanation: "[[km:concept.zh.hsk1.subject_noun]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "衣服很好看。"
+      - "这个房间很干净。"
+    sort_order: 240
+
+  - slug: zh.hsk1.predicate_verb_adj
+    standard_ref: 一25
+    pattern: "[主语] + [动词性/形容词性短语]"
+    km_explanation: "[[km:concept.zh.hsk1.predicate_verb_adj]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "我们学中文。"
+      - "这个菜很好吃。"
+    sort_order: 250
+
+  - slug: zh.hsk1.object_noun
+    standard_ref: 一26
+    pattern: "[主语] + [动词] + [名词/代词/名词性短语]"
+    km_explanation: "[[km:concept.zh.hsk1.object_noun]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "他吃面包。"
+      - "她买了一个手机。"
+    sort_order: 260
+
+  - slug: zh.hsk1.attributive
+    standard_ref: 一27
+    pattern: "[名词性/形容词性词语/数量短语] + [名词]"
+    km_explanation: "[[km:concept.zh.hsk1.attributive]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "新书包很好看。"
+      - "我喜欢干净的房间。"
+    sort_order: 270
+
+  - slug: zh.hsk1.adverbial
+    standard_ref: 一28
+    pattern: "[副词/形容词/时间词/处所词] + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.adverbial]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "他不吃包子。"
+      - "他十点睡觉。"
+    sort_order: 280
+
+  - slug: zh.hsk1.verb_predicate_sentence
+    standard_ref: 一29
+    pattern: "[主语] + [动词] + [宾语]"
+    km_explanation: "[[km:concept.zh.hsk1.verb_predicate_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我买一个面包。"
+      - "他不去医院。"
+    sort_order: 290
+
+  - slug: zh.hsk1.adjective_predicate_sentence
+    standard_ref: 一30
+    pattern: "[主语] + [程度副词] + [形容词]"
+    km_explanation: "[[km:concept.zh.hsk1.adjective_predicate_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "房间很干净。"
+      - "这个学生最认真。"
+    sort_order: 300
+
+  - slug: zh.hsk1.non_subject_predicate_sentence
+    standard_ref: 一31
+    pattern: "[无主语的独立句]"
+    km_explanation: "[[km:concept.zh.hsk1.non_subject_predicate_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "下雨了。"
+      - "车！"
+    sort_order: 310
+
+  - slug: zh.hsk1.declarative_sentence
+    standard_ref: 一32
+    pattern: "[陈述句]"
+    km_explanation: "[[km:concept.zh.hsk1.declarative_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "妈妈做晚饭。"
+      - "我不喜欢看电视。"
+    sort_order: 320
+
+  - slug: zh.hsk1.interrogative_sentence
+    standard_ref: 一33
+    pattern: "[是非问 / 特指问 / 选择问 / 正反问]"
+    km_explanation: "[[km:concept.zh.hsk1.interrogative_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
+    example_sentences:
+      - "谁跟你一起去书店？"
+      - "你爸爸是老师还是医生？"
+    sort_order: 330
+
+  - slug: zh.hsk1.imperative_sentence
+    standard_ref: 一34
+    pattern: "请 + [动词]；别 + [动词]"
+    km_explanation: "[[km:concept.zh.hsk1.imperative_sentence]]"
+    hskk_task_types: [listen_and_repeat]
+    example_sentences:
+      - "请进！"
+      - "别说了！"
+    sort_order: 340
+
+  - slug: zh.hsk1.exclamatory_sentence
+    standard_ref: 一35
+    pattern: "太 + [形容词] + 了！；真 + [形容词] ！"
+    km_explanation: "[[km:concept.zh.hsk1.exclamatory_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "今天太热了！"
+      - "这水果真好吃！"
+    sort_order: 350
+
+  - slug: zh.hsk1.shi_sentence
+    standard_ref: 一36
+    pattern: "A + 是 + B"
+    km_explanation: "[[km:concept.zh.hsk1.shi_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "他是我的老师。"
+      - "花是白的。"
+    sort_order: 360
+
+  - slug: zh.hsk1.you_sentence
+    standard_ref: 一37
+    pattern: "A + 有 + B；[处所] + 有 + [名词]"
+    km_explanation: "[[km:concept.zh.hsk1.you_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我有很多书。"
+      - "房间里有两张桌子。"
+    sort_order: 370
+
+  - slug: zh.hsk1.comparison_bi
+    standard_ref: 一38
+    pattern: "A 比 B + [形容词]；A 没有 B + [形容词]"
+    km_explanation: "[[km:concept.zh.hsk1.comparison_bi]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我朋友比我高。"
+      - "昨天没有今天热。"
+    sort_order: 380
+
+  - slug: zh.hsk1.coordinate_complex_sentence
+    standard_ref: 一39
+    pattern: "[分句]，[分句]；一边……，一边……"
+    km_explanation: "[[km:concept.zh.hsk1.coordinate_complex_sentence]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "我喜欢看电视，弟弟喜欢打球。"
+      - "他一边走路，一边唱歌。"
+    sort_order: 390
+
+  - slug: zh.hsk1.aspect_change_le2
+    standard_ref: 一40
+    pattern: "[动词/形容词] + 了（变化）"
+    km_explanation: "[[km:concept.zh.hsk1.aspect_change_le2]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "她病了。"
+      - "雨小了。"
+    sort_order: 400
+
+  - slug: zh.hsk1.aspect_complete_le1
+    standard_ref: 一41
+    pattern: "[动词] + 了（完成）"
+    km_explanation: "[[km:concept.zh.hsk1.aspect_complete_le1]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "他买了两个面包。"
+      - "我喝了很多水。"
+    sort_order: 410
+
+  - slug: zh.hsk1.aspect_progressive
+    standard_ref: 一42
+    pattern: "在 / 正 / 正在 + [动词] （+ 呢）"
+    km_explanation: "[[km:concept.zh.hsk1.aspect_progressive]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "外边正在下雨。"
+      - "同学们正在考试呢。"
+    sort_order: 420
+
+  - slug: zh.hsk1.money_expression
+    standard_ref: 一43
+    pattern: "[数] + 块 / 毛 / 分"
+    km_explanation: "[[km:concept.zh.hsk1.money_expression]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "九块三（毛）"
+      - "一百五十（块）"
+    sort_order: 430
+
+  - slug: zh.hsk1.time_expression
+    standard_ref: 一44
+    pattern: "[年月日星期]；[点分] + 半 / 差"
+    km_explanation: "[[km:concept.zh.hsk1.time_expression]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer]
+    example_sentences:
+      - "七月十号"
+      - "五点半"
+    sort_order: 440
+
+  - slug: zh.hsk1.ask_with_ma
+    standard_ref: 一45
+    pattern: "[陈述句] + 吗？"
+    km_explanation: "[[km:concept.zh.hsk1.ask_with_ma]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
+    example_sentences:
+      - "他是老师吗？"
+      - "这包子好吃吗？"
+    sort_order: 450
+
+  - slug: zh.hsk1.ask_with_question_words
+    standard_ref: 一46
+    pattern: "用 多 / 多少 / 几 / 哪 / 哪儿 / 哪里 / 哪些 / 什么 / 谁 / 怎么 提问"
+    km_explanation: "[[km:concept.zh.hsk1.ask_with_question_words]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
+    example_sentences:
+      - "你家有几口人？"
+      - "你星期天做什么？"
+    sort_order: 460
+
+  - slug: zh.hsk1.ask_with_haishi
+    standard_ref: 一47
+    pattern: "A + 还是 + B？"
+    km_explanation: "[[km:concept.zh.hsk1.ask_with_haishi]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
+    example_sentences:
+      - "她妈妈是老师还是医生？"
+      - "你喝水还是喝牛奶？"
+    sort_order: 470
+
+  - slug: zh.hsk1.ask_affirmative_negative
+    standard_ref: 一48
+    pattern: "[动词/形容词] + 不 / 没 + [动词/形容词]？"
+    km_explanation: "[[km:concept.zh.hsk1.ask_affirmative_negative]]"
+    hskk_task_types: [listen_and_repeat, listen_and_answer, answer_questions]
+    example_sentences:
+      - "这本书贵不贵？"
+      - "你吃不吃包子？"
+    sort_order: 480
