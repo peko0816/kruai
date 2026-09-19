@@ -12,11 +12,17 @@
 | 依赖管理 | uv（或 pip-tools，二选一后不再变） | `pyproject.toml` |
 | Lint + Format | ruff（含 isort 规则） | `pyproject.toml [tool.ruff]` |
 | 类型检查 | mypy，`strict = true` | `pyproject.toml [tool.mypy]` |
-| 测试 | pytest + pytest-asyncio | `pyproject.toml` |
+| 测试 | pytest + pytest-asyncio + pytest-xdist | `pyproject.toml` |
 | 迁移 | alembic | `backend/alembic/` |
 | 前端（M3） | TypeScript strict + ESLint + Prettier | `miniapp/` |
 
 `make check` = `ruff check` + `ruff format --check` + `mypy` + `pytest`。**这条命令必须全绿才能提交。**
+
+测试默认并行 4 个 worker（`--dist loadfile`，同一文件进同一 worker），约 70 秒跑完。
+集成测试**共用一个临时库**，每个测试进入前 TRUNCATE 全部表来隔离（D-076）。
+调试某个失败时用 `make test PYTEST_WORKERS=1` 退回单进程。
+**新增数据表不需要改测试**——重置的表清单是从数据库读回来的，
+`tests/integration/test_isolation.py` 会校验它与实际存在的表完全一致。
 
 ---
 

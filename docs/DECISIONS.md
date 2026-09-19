@@ -1790,6 +1790,51 @@ PRD 未定义、由实施方自行决定的事项记录在此。
   `workers/subscriptions.py`、`services/cost_ledger.py`、
   `docs/DATA_MODEL.sql`（注释补一个取值）。
 
+## D-076 集成测试共用一个库并按文件并行，`make check` 从 3 分 52 秒降到 1 分 10 秒
+
+- 日期：2026-09-19
+- 背景：G-D 验收花了两小时，其中最大的一块不是思考也不是改代码，是**等测试**。
+  测下来：745 个单测 9 秒，356 个集测 **3 分 45 秒**，
+  而最慢的单个测试才 2 秒——慢的不是测试，是每个测试的固定开销。
+  两处：
+  - **每个测试新建一个 PostgreSQL 数据库、灌一遍完整 DDL、再删掉**，356 次；
+  - 每个测试新开 3 条数据库连接。实测本机新开一条 **45 毫秒**，
+    从池里借一条 **5 毫秒**。
+- 选择：
+  1. **一个 run 一个库**，不是一个测试一个库。库仍然是 uuid 命名的临时库，
+     碰不到开发者自己的库；隔离改由 `migrated_db` 在**进入测试前** TRUNCATE
+     全部表来保证。真正需要空库的只有 schema 守卫（它自己建 schema、
+     还要 downgrade 再 upgrade），它继续用 `scratch_db`；
+  2. **连接池化**：`shared_engine` 会话级，truncate 与读回都走它；
+  3. **xdist 并行 4 个 worker，`--dist loadfile`**（同一文件进同一 worker）。
+     每个 worker 是独立进程，PostgreSQL 临时库自然各建各的；
+     **Redis 不会自动分开**——一台服务器、编号固定的库，而 bot 的 fixture
+     按前缀清 key。所以 `worker_index()` 给每个 worker 分一个 Redis 库，
+     并在 worker 数超过预留库数时**直接报错**，不绕回 0。
+     绕回去的症状是「某个 bot 测试每两周挂一次，谁也复现不了」；
+  4. 测试用的连接池调小（5 + 2）：PostgreSQL 默认 100 条连接，
+     4 个 worker 分，出厂的 30 条池会让 CI 死在 "too many clients"
+     而不是死在任何人写的断言上。并发测试本来就是「比池能给的多一个」，
+     池小反而更快也更狠。
+- 实测：`make test` **3 分 52 秒 → 1 分 10 秒**（连跑三次 69.8 / 70.2 / 79.6 秒）；
+  单进程回退 `make test PYTEST_WORKERS=1` 仍全绿，2 分 36 秒。
+- 隔离性有没有变弱？`tests/integration/test_isolation.py` 专门盯这件事：
+  - 一个测试写入、下一个测试查每张表都是空的；
+  - **重置的表清单必须等于数据库里实际存在的表**——两个来源比对。
+    只查「表是不是空的」不够：没有测试写过的表漏掉了也看不出来，
+    而且 `TRUNCATE ... CASCADE` 会顺着外键把漏掉的表一起清掉，
+    漏洞会藏在某个关系背后，直到有人删掉那个外键；
+  - worker 与 Redis 库号一一对应，超配时报错。
+- 变异测试：5 个变异，4 个被捕获（不重置 / 漏一张无外键归属的表 /
+  漏一张 CASCADE 够得着的表 / 所有 worker 共用 Redis 0 号库）。
+  **第 5 个「不 RESTART IDENTITY」是知情放行**：全库只有一个序列
+  （`cost_ledger.id`），没有任何测试读它的值，为它补一个断言就是
+  为覆盖率写测试（CLAUDE.md 第 9 节禁止）。子句保留并在注释里写明原因。
+- 回退成本：低。`PYTEST_WORKERS=1` 随时退回单进程；
+  共用库要退回「一测一库」只需把 `migrated_db` 改回建库。
+- 影响范围：`tests/integration/conftest.py`、`tests/integration/test_isolation.py`、
+  `Makefile`、`backend/pyproject.toml`（新增 pytest-xdist）。
+
 ---
 
 # 遗留约束

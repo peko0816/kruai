@@ -42,8 +42,15 @@ fmt-check:
 type:
 	$(UV_RUN) mypy
 
+# -n 4 rather than -n auto: the integration suite waits on PostgreSQL round
+# trips rather than on CPU, so it parallelises well, but each worker takes a
+# scratch database and a Redis logical database and those are not unlimited.
+# Override with `make test PYTEST_WORKERS=1` when a failure needs a clean
+# single-process run.
+PYTEST_WORKERS ?= 4
+
 test:
-	$(UV_RUN) pytest
+	$(UV_RUN) pytest -n $(PYTEST_WORKERS) --dist loadfile
 
 # Reads the real .env, so it catches a deployment the test suite cannot see.
 # Exits non-zero when a configured provider cannot do its job.
