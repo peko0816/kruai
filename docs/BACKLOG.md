@@ -67,10 +67,14 @@
 | D8a | 付费墙 + 下单收单：Free/Basic 限额生效；`POST /payments/checkout` + `POST /payments/webhook/{provider}`；`Money` 值对象与 `core/money.py` | B4 C4 | FakeProvider 下可完成一笔"支付"并开通订阅；验签失败拒绝开通；KHR（0 位小数）与 USD（2 位）都有单测 |
 | D8b | **订阅续费双路径**（ARCHITECTURE 3.4）：`renewal_mode` 状态机、grace 期、auto 扣款定时任务 + 重试、manual 提醒定时任务 + 防重复 | D8a | 两条路径各有集成测试；FakeProvider 可分别模拟 `supports_recurring` 为真/假；grace 到期正确降级 |
 | D9 | `[BLOCKED-M0]` ABA PayWay 真实 adapter（含 `HASH_FIELD_ORDER` 核对） | D8a + M0-3 | 真实小额支付 + 回调验签通过 |
+| D10 | 成本护栏（PRD 11.3）：按用户按月累计 `cost_ledger`，超过档位上限 `COST_ALERT_MULTIPLIER` 倍时告警并自动限流。**比较必须显式取整**（L-1：`45 × 1.5 = 67.5`，67 算不算超标要人来定，不能让浮点序关系替你决定） | D5 D8a | 单测覆盖取整边界（恰好 67、恰好 68）；被限流的用户拿到 402 且不产生付费调用；告警可在日志与 `/admin/costs` 里看到 |
 
 `[GATE]` **G-D / M2**：对照 `DEFINITION_OF_DONE.md` 的 M2 清单逐条验收。
 
 > 注：D8b（续费双路径）相比"只做单一路径"约增加 3–5 天工作量，已计入 M2 的 4–6 周区间的上沿。
+>
+> 注：D10 排在 D8a 之后，因为限流要决定「降到哪一档」，而那取决于订阅链路已经跑通。
+> 在它落地之前，PRD 11.2 的成本上限只能靠人看 `/admin/costs`（见 DECISIONS 的 L-10）。
 
 ---
 
