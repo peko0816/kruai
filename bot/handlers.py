@@ -108,8 +108,15 @@ class Conversation:
                 lesson = await self._api.lesson(token, stored.lesson_id)
                 return await self._play(learner, lesson, resume(lesson, stored), token)
 
-            lesson_id = await self._api.first_lesson_id(token)
+            lesson_id = await self._api.next_lesson_id(token)
             if lesson_id is None:
+                # Nothing left to do is a different thing from nothing to do.
+                # Written as two Reply() calls rather than one with a chosen
+                # key, so bot/i18n_check.py can see both — it recognises keys
+                # by position, and a key assembled into a variable is invisible
+                # to it (which is how this one was found).
+                if await self._api.has_courses(token):
+                    return _render([Reply("bot.all_lessons_done")], learner.locale)
                 return _render([Reply("bot.no_content")], learner.locale)
             # Starting is what costs a task (PRD 4.3), so a learner who is out
             # of them is refused here, before any of the lesson is shown.

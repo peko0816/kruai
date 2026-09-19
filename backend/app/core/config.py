@@ -209,6 +209,15 @@ class Settings(BaseSettings):
     price_pro_monthly: str = "USD:599"
     price_pro_yearly: str = "USD:5400"
 
+    #: How long a payment may sit at pending before the reconciliation job asks
+    #: the acquirer what happened to it. Long enough that a callback in flight
+    #: is not chased, short enough that a learner who paid is not left waiting.
+    payment_reconcile_after_minutes: int = Field(default=10, gt=0)
+    #: When a still-pending order is written off. A checkout somebody opened
+    #: and walked away from is the common case; leaving those pending forever
+    #: makes "how many payments are stuck" unanswerable.
+    payment_abandon_after_hours: int = Field(default=24, gt=0)
+
     # --------------------------------------------------------------- 6. 媒体与回退
     #: Keep false until the S2 entry conditions are met (PRD 7.2).
     media_video_enabled: bool = False

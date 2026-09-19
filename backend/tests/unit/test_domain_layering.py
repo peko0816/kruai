@@ -27,7 +27,7 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
 
-DOMAIN_PACKAGES = ("mastery", "media", "entitlements", "experiments")
+DOMAIN_PACKAGES = ("mastery", "media", "entitlements", "experiments", "subscriptions")
 ADAPTER_PACKAGES = ("scoring", "tts", "payments", "llm")
 
 #: The one module name inside an adapter package the domain layer may name.

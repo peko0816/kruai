@@ -30,6 +30,7 @@ pytestmark = pytest.mark.integration
 
 QUEUE_URL = "/api/v1/review/queue"
 LESSONS_URL = "/api/v1/lessons"
+COURSES_URL = "/api/v1/courses"
 
 #: Three concepts so an ordering assertion has something to order.
 CONCEPTS = ("zh.hsk1.want_noun", "zh.hsk1.this_that", "zh.hsk1.how_many")
@@ -110,8 +111,19 @@ async def authenticated(client: httpx.AsyncClient, **kwargs: Any) -> dict[str, s
 
 
 async def complete(
-    client: httpx.AsyncClient, lesson_id: uuid.UUID, *, headers: dict[str, str]
+    client: httpx.AsyncClient,
+    lesson_id: uuid.UUID,
+    *,
+    headers: dict[str, str],
+    opened: bool = True,
 ) -> httpx.Response:
+    """Finish a lesson, starting it first unless the test is about not doing so.
+
+    Completing without starting used to be allowed, and that was the hole the
+    task allowance fell through (D-058).
+    """
+    if opened:
+        await client.post(f"{LESSONS_URL}/{lesson_id}/start", headers=headers)
     return await client.post(f"{LESSONS_URL}/{lesson_id}/complete", headers=headers)
 
 
@@ -262,6 +274,171 @@ async def test_starting_needs_a_token(
     client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
 ) -> None:
     assert (await start(client, seeded["lesson"], headers={})).status_code == 401
+
+
+# --------------------------------------------- the door the allowance guards
+
+
+async def test_a_lesson_cannot_be_read_before_it_is_started(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """The defect this endpoint pair existed to prevent and did not.
+
+    Before this check a learner refused at /start for having no tasks left
+    could read the whole lesson anyway and mark it complete: the allowance held
+    only for clients that volunteered to ask for it, which is the arrangement
+    ARCHITECTURE section 1 forbids in as many words.
+    """
+    headers = await authenticated(client)
+
+    response = await client.get(f"{LESSONS_URL}/{seeded['lesson']}", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "lesson.not_started"
+
+
+async def test_a_lesson_cannot_be_completed_before_it_is_started(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
+) -> None:
+    headers = await authenticated(client)
+
+    response = await complete(client, seeded["lesson"], headers=headers, opened=False)
+
+    assert response.status_code == 409
+    assert rows("SELECT count(*) FROM lesson_progress") == [(0,)]
+    assert rows("SELECT count(*) FROM concept_mastery") == [(0,)]
+
+
+async def test_no_tasks_left_means_no_lesson_at_all(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows, execute: Execute
+) -> None:
+    """The whole point, end to end: a learner out of tasks gets nothing.
+
+    Every door in turn — start, read, complete — and none of them opens.
+    """
+    headers = await authenticated(client)
+    execute("UPDATE entitlements SET daily_tasks_used = 3")
+
+    started = await start(client, seeded["lesson"], headers=headers)
+    read = await client.get(f"{LESSONS_URL}/{seeded['lesson']}", headers=headers)
+    finished = await complete(client, seeded["lesson"], headers=headers, opened=False)
+
+    assert started.status_code == 402
+    assert read.status_code == 409
+    assert finished.status_code == 409
+    assert rows("SELECT count(*) FROM lesson_progress") == [(0,)]
+
+
+async def test_a_started_lesson_reads_and_completes(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """The door opens for the learner who has the allowance."""
+    headers = await authenticated(client)
+
+    await start(client, seeded["lesson"], headers=headers)
+    read = await client.get(f"{LESSONS_URL}/{seeded['lesson']}", headers=headers)
+    finished = await complete(client, seeded["lesson"], headers=headers, opened=False)
+
+    assert read.status_code == 200
+    assert finished.status_code == 200
+
+
+async def test_a_completed_lesson_can_still_be_read(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """Revisiting is not a new task, so it must not be a refusal either."""
+    headers = await authenticated(client)
+    await complete(client, seeded["lesson"], headers=headers)
+
+    response = await client.get(f"{LESSONS_URL}/{seeded['lesson']}", headers=headers)
+
+    assert response.status_code == 200
+
+
+# ------------------------------------------------ which lesson comes next
+
+
+async def test_the_server_says_which_lesson_is_next(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    headers = await authenticated(client)
+
+    body = (await client.get(f"{COURSES_URL}/{seeded['course']}/lessons", headers=headers)).json()
+
+    assert body["next_lesson_id"] == str(seeded["lesson"])
+
+
+async def test_finishing_one_lesson_moves_on_to_the_next(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """The defect: taking the first of the list offered lesson one forever.
+
+    A learner who finished it was handed it again, and the second lesson was
+    unreachable — which would have shown up the first time a real learner got
+    to the end of a unit.
+    """
+    headers = await authenticated(client)
+    await complete(client, seeded["lesson"], headers=headers)
+
+    body = (await client.get(f"{COURSES_URL}/{seeded['course']}/lessons", headers=headers)).json()
+
+    assert body["next_lesson_id"] == str(seeded["empty_lesson"])
+    assert [row["status"] for row in body["lessons"]] == ["completed", "not_started"]
+
+
+async def test_an_unfinished_lesson_is_resumed_before_a_new_one_is_offered(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """A lesson left half done is the one they were in the middle of."""
+    headers = await authenticated(client)
+    await start(client, seeded["lesson"], headers=headers)
+
+    body = (await client.get(f"{COURSES_URL}/{seeded['course']}/lessons", headers=headers)).json()
+
+    assert body["next_lesson_id"] == str(seeded["lesson"])
+
+
+async def test_a_started_second_lesson_outranks_an_untouched_first(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """Resuming wins over sequence: they are mid-way through this one.
+
+    The second lesson is the one with no concepts, which is also why it is the
+    one used here — what matters is its place in the sequence, not its content.
+    """
+    headers = await authenticated(client)
+    await start(client, seeded["empty_lesson"], headers=headers)
+
+    body = (await client.get(f"{COURSES_URL}/{seeded['course']}/lessons", headers=headers)).json()
+
+    assert body["next_lesson_id"] == str(seeded["empty_lesson"])
+
+
+async def test_finishing_everything_leaves_no_next_lesson(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """None, rather than looping back to the first — "you are up to date" is a
+    different thing to say than "here is lesson one again"."""
+    headers = await authenticated(client)
+    await complete(client, seeded["lesson"], headers=headers)
+    await complete(client, seeded["empty_lesson"], headers=headers)
+
+    body = (await client.get(f"{COURSES_URL}/{seeded['course']}/lessons", headers=headers)).json()
+
+    assert body["next_lesson_id"] is None
+
+
+async def test_progress_is_the_caller_s_own(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    mine = await authenticated(client, telegram_id=6101)
+    theirs = await authenticated(client, telegram_id=6102)
+    await complete(client, seeded["lesson"], headers=mine)
+
+    body = (await client.get(f"{COURSES_URL}/{seeded['course']}/lessons", headers=theirs)).json()
+
+    assert body["next_lesson_id"] == str(seeded["lesson"])
+    assert body["lessons"][0]["status"] == "not_started"
 
 
 # ----------------------------------------------------------------- completion

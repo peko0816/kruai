@@ -198,6 +198,19 @@ async def authenticated(client: httpx.AsyncClient, **kwargs: Any) -> dict[str, s
     return auth_header(await token_for(client, **kwargs))
 
 
+async def opened(
+    client: httpx.AsyncClient, lesson_id: uuid.UUID, *, headers: dict[str, str]
+) -> None:
+    """Start a lesson, because reading its contents now requires it.
+
+    The contents are the lesson, so handing them over to somebody who never
+    started it made the daily task allowance something clients enforced on
+    themselves (D-058). Every test that reads a lesson goes through the door.
+    """
+    response = await client.post(f"{LESSONS_URL}/{lesson_id}/start", headers=headers)
+    assert response.status_code == 200, response.text
+
+
 def subscribe(execute: Execute, user_id: uuid.UUID, *, plan: str, status: str = "active") -> None:
     """A live subscription, as D8a will write one after a payment."""
     execute(
@@ -278,9 +291,12 @@ async def test_lessons_come_back_in_teaching_order(
 
     assert response.status_code == 200
     body = response.json()
-    assert [row["sequence"] for row in body] == [1, 2]
-    assert [row["id"] for row in body] == [str(content.lesson_id), str(content.second_lesson_id)]
-    assert body[0]["concept_ids"] == [str(content.concept_id)]
+    lessons = body["lessons"]
+    assert [row["sequence"] for row in lessons] == [1, 2]
+    assert [row["id"] for row in lessons] == [str(content.lesson_id), str(content.second_lesson_id)]
+    assert lessons[0]["concept_ids"] == [str(content.concept_id)]
+    assert [row["status"] for row in lessons] == ["not_started", "not_started"]
+    assert body["next_lesson_id"] == str(content.lesson_id)
 
 
 async def test_an_unknown_course_is_not_an_empty_lesson_list(
@@ -347,6 +363,7 @@ async def test_a_lesson_returns_its_items_in_order(
     client: httpx.AsyncClient, content: Content
 ) -> None:
     headers = await authenticated(client)
+    await opened(client, content.lesson_id, headers=headers)
 
     response = await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)
 
@@ -362,6 +379,7 @@ async def test_the_content_payload_is_passed_through_unchanged(
 ) -> None:
     """The pack's JSON is content, not something the API reshapes."""
     headers = await authenticated(client)
+    await opened(client, content.lesson_id, headers=headers)
 
     body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
@@ -402,6 +420,7 @@ async def test_both_urls_are_returned_and_the_server_picks(
     and the client is never the one deciding.
     """
     headers = await authenticated(client)
+    await opened(client, content.lesson_id, headers=headers)
 
     body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
     explain = body["items"][0]["media"]
@@ -420,6 +439,7 @@ async def test_an_item_with_no_recording_degrades_to_text(
 ) -> None:
     """build_pack.py ships a pack whose TTS failed; the lesson still opens."""
     headers = await authenticated(client)
+    await opened(client, content.lesson_id, headers=headers)
 
     body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
     silent = body["items"][2]["media"]
@@ -440,6 +460,7 @@ async def test_video_is_served_with_audio_underneath_it(
         user_id = await sign_in(client, video_on)
         subscribe(execute, user_id, plan="pro")
         headers = await authenticated(client)
+        await opened(client, content.lesson_id, headers=headers)
 
         body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
@@ -461,6 +482,7 @@ async def test_an_audio_only_item_has_no_fallback_to_offer(
         user_id = await sign_in(client, video_on)
         subscribe(execute, user_id, plan="pro")
         headers = await authenticated(client)
+        await opened(client, content.lesson_id, headers=headers)
 
         body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
@@ -481,6 +503,7 @@ async def test_data_saver_outranks_a_paid_plan(
         subscribe(execute, user_id, plan="pro")
         execute("UPDATE user_profiles SET data_saver = true WHERE user_id = :u", u=user_id)
         headers = await authenticated(client)
+        await opened(client, content.lesson_id, headers=headers)
 
         body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
@@ -517,6 +540,7 @@ async def test_the_plan_comes_from_the_subscription_row(
         user_id = await sign_in(client, video_on)
         subscribe(execute, user_id, plan=plan, status=status)
         headers = await authenticated(client)
+        await opened(client, content.lesson_id, headers=headers)
 
         body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
@@ -530,6 +554,7 @@ async def test_a_learner_with_no_subscription_is_on_free(
 
     async with client_for(video_on) as client:
         headers = await authenticated(client)
+        await opened(client, content.lesson_id, headers=headers)
         body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
     assert body["items"][0]["media"]["decision"] == "plan_below_minimum"
@@ -555,6 +580,7 @@ async def test_the_experiment_assigns_the_arm_when_it_is_running(
         user_id = await sign_in(client, running)
         subscribe(execute, user_id, plan="pro")
         headers = await authenticated(client)
+        await opened(client, content.lesson_id, headers=headers)
 
         body = (await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)).json()
 
@@ -567,6 +593,7 @@ async def test_nothing_is_assigned_while_the_experiment_is_off(
 ) -> None:
     """D-022: a row written while the experiment is off is a phantom exposure."""
     headers = await authenticated(client)
+    await opened(client, content.lesson_id, headers=headers)
 
     await client.get(f"{LESSONS_URL}/{content.lesson_id}", headers=headers)
 

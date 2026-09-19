@@ -95,6 +95,18 @@ class ContentNotFound(AppError):
     http_status = 404
 
 
+class LessonNotStarted(AppError):
+    """The learner has not opened this lesson.
+
+    409 rather than 404 or 402: the lesson exists and the learner may well have
+    the allowance for it — what is missing is the step that spends it. A client
+    that meets this posts to /start and carries on.
+    """
+
+    code = "lesson.not_started"
+    http_status = 409
+
+
 class ItemNotScorable(AppError):
     """Something was said back to a card that has nothing to say back to.
 

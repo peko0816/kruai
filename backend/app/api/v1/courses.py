@@ -23,8 +23,14 @@ from pydantic import BaseModel
 from app.api.deps import CurrentUserDep, SessionDep
 from app.core.errors import ContentNotFound
 from app.models.content import Course, Lesson
+from app.models.learning import LessonProgress
 
 router = APIRouter(prefix="/courses", tags=["learning"])
+
+#: A lesson with no progress row. Not a stored value — lesson_progress only has
+#: 'started' and 'completed' (DATA_MODEL.sql) — so it is named here rather than
+#: left as a null for each client to interpret.
+NOT_STARTED = "not_started"
 
 
 class CourseOut(BaseModel):
@@ -44,6 +50,22 @@ class LessonSummaryOut(BaseModel):
     #: What this lesson teaches. Mastery is tracked per concept, not per
     #: lesson (PRD 3.2), so a client showing progress needs these.
     concept_ids: list[uuid.UUID]
+    #: not_started / started / completed, for this learner.
+    status: str
+
+
+class CourseLessonsOut(BaseModel):
+    """A course's lessons, and which one this learner should do now.
+
+    ``next_lesson_id`` is the server's answer, not a hint. Letting a client
+    work it out is how the bot ended up offering lesson one forever: it took
+    the first of the list, and the list does not know who is asking
+    (docs/DECISIONS.md D-057).
+    """
+
+    lessons: list[LessonSummaryOut]
+    #: None when every lesson in the course is finished.
+    next_lesson_id: uuid.UUID | None
 
 
 @router.get("")
@@ -85,8 +107,8 @@ async def list_courses(
 @router.get("/{course_id}/lessons")
 async def list_lessons(
     course_id: uuid.UUID, session: SessionDep, user_id: CurrentUserDep
-) -> list[LessonSummaryOut]:
-    """One course's lessons in teaching order.
+) -> CourseLessonsOut:
+    """One course's lessons in teaching order, with this learner's progress.
 
     Raises:
         ContentNotFound: no such course, or one this endpoint does not serve.
@@ -100,14 +122,45 @@ async def list_lessons(
     if exists.scalar_one_or_none() is None:
         raise ContentNotFound(course_id=str(course_id))
 
-    statement = sa.select(Lesson).where(Lesson.course_id == course_id).order_by(Lesson.sequence)
-    rows = (await session.execute(statement)).scalars().all()
-    return [
+    statement = (
+        sa.select(Lesson, LessonProgress.status)
+        .outerjoin(
+            LessonProgress,
+            sa.and_(
+                LessonProgress.lesson_id == Lesson.id,
+                LessonProgress.user_id == user_id,
+            ),
+        )
+        .where(Lesson.course_id == course_id)
+        .order_by(Lesson.sequence)
+    )
+    lessons = [
         LessonSummaryOut(
             id=row.id,
             sequence=row.sequence,
             title_km=row.title_km,
             concept_ids=list(row.concept_ids),
+            status=status or NOT_STARTED,
         )
-        for row in rows
+        for row, status in (await session.execute(statement)).all()
     ]
+    return CourseLessonsOut(lessons=lessons, next_lesson_id=_next_lesson(lessons))
+
+
+def _next_lesson(lessons: list[LessonSummaryOut]) -> uuid.UUID | None:
+    """The first lesson this learner has not finished, in teaching order.
+
+    Resuming outranks starting something new: a lesson left half done is the
+    one they were in the middle of. Beyond that it is simply the next unfinished
+    one, which is what "next" means in a course with a sequence.
+
+    None when everything is done, which a client shows as "you are up to date"
+    rather than by starting the first lesson again.
+    """
+    for lesson in lessons:
+        if lesson.status == "started":
+            return lesson.id
+    for lesson in lessons:
+        if lesson.status == NOT_STARTED:
+            return lesson.id
+    return None

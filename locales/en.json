@@ -2,6 +2,7 @@
   "attempt.feedback.passed": "Well said.",
   "attempt.feedback.retry": "Not quite — listen again and repeat.",
   "avatar.ai_disclaimer": "This explanation is delivered by an AI assistant, not a human teacher.",
+  "bot.all_lessons_done": "You have finished every lesson available. Send /status to see today's allowance.",
   "bot.awaiting_voice": "Send a voice message for this step.",
   "bot.error": "Something went wrong. Please try again.",
   "bot.explain": "{text}",

@@ -1337,6 +1337,84 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 影响范围：`app/api/v1/payments.py`、D8b。
 - 保障：变异 D（假定 auto）与变异 E（不写 next_charge_at）各转红。
 
+## D-057 「下一课是哪一课」由服务端回答
+
+- 日期：2026-09-19
+- 背景：D6 的 Bot 取 `GET /courses/{id}/lessons` 返回数组的第 0 个。
+  我当时的理由是「Bot 不该自己发明业务规则」——理由对，做法错：
+  **结果是学完第一课之后，`/learn` 还是给第一课，第二课永远够不着。**
+  探针验证过：接口返回两课，进度是 completed，Bot 仍然取第一个。
+- 选择：课时列表改成对象 `{lessons: [...], next_lesson_id}`，
+  每个课时带上这位学习者的 `status`（not_started / started / completed）；
+  `next_lesson_id` 由服务端算：**先找 started（在读的那本优先），再找
+  not_started，都没有就是 `null`**。Bot 只读这个字段。
+- 理由：
+  - 「下一课」是业务判断，列表本身**不知道是谁在问**。把它留给客户端，
+    每个客户端都会给出一个不同的错答案。
+  - **`null` 而不是绕回第一课**：「你已经学完了」和「再来一遍第一课」
+    是两句完全不同的话。
+  - 数组改对象是破坏性变更，但唯一的消费者是我们自己的 Bot。
+- 回退成本：低。
+- 影响范围：`app/api/v1/courses.py`、`bot/api_client.py`、F1（Mini App 同样读这个字段）。
+- 保障：变异 D（回到取第 0 个）转红 5 条、变异 E（学完绕回第一课）与
+  变异 F（不优先续读）各转红 2 条、变异 G（进度不按调用者过滤）转红。
+
+## D-058 读课文与完课都要求已开课——否则任务额度形同虚设
+
+- 日期：2026-09-19
+- 背景：D8a 把任务额度放在 `POST /lessons/{id}/start`（D-054）。
+  用探针把三个端点连起来打了一遍，结果是：
+  ```
+  额度用尽 → start:    402
+             读课文:   200（items 全给）
+             complete: 200（写进 lesson_progress）
+  ```
+  **额度一个东西也没挡住。** 这不是疏漏，是 ARCHITECTURE 第 1 节
+  明文禁止的那种情况：额度够不够只在客户端自愿询问时才成立。
+- 选择：`GET /lessons/{id}` 与 `POST /lessons/{id}/complete` 都要求
+  已存在 `lesson_progress` 行，否则 409 `lesson.not_started`。
+- 理由：
+  - **课文就是课**。把 items 交给一个没开过课的人，等于把门开在没人看的地方。
+  - **409 而不是 404 或 402**：课存在，学习者也可能有额度，缺的是花掉它的那一步。
+    客户端遇到它就去 POST /start，然后继续。
+  - 已完成的课仍然可读（重看不是新任务，所以也不该是拒绝）。
+- 回退成本：低，但**是破坏性变更**：任何客户端都必须先 start。
+  仓库内唯一的客户端（Bot）本来就先 start。
+- 影响范围：`app/api/v1/lessons.py`、D2 的契约、F1。
+- 保障：变异 A（读不校验）、变异 B（完课不校验）、变异 C（校验恒真）各转红。
+- 附带说明：**这是探针发现的，不是测试发现的。** 当时的测试全都先 start 再读，
+  所以它们从来没走过「没 start 就读」那条路——一条没被写下来的路径，
+  测试再多也照不到。已补齐三条端点各自的拒绝用例，以及一条把三扇门
+  依次撞一遍的测试。
+
+## D-059 回调丢失的兜底：`services/subscriptions` + `workers/`
+
+- 日期：2026-09-19
+- 背景：`payments/base.py` 写着 `query_status` 是「用于回调丢失时的对账兜底」，
+  而 D8a 之后**没有任何代码调用它**。收单机构的回调丢一次，那笔订单永远停在
+  pending：用户付了钱、订阅没开、没有任何东西在找它。这是动钱的。
+- 选择：
+  - 新增领域包 `services/subscriptions/`，把「结算订单并开通」从 API handler
+    里搬出来，Webhook 与对账任务**调用同一个函数**；
+  - 新增 `app/workers/`（ARCHITECTURE 第 6 节本来就规划了这个目录，此前是空的），
+    放 `reconcile_pending_payments()`：查 pending 超过
+    `PAYMENT_RECONCILE_AFTER_MINUTES` 的订单 → `query_status` →
+    成功就走同一条结算路径，失败就置 failed，超过
+    `PAYMENT_ABANDON_AFTER_HOURS` 仍 pending 就判定放弃。
+- 理由：
+  - **两条发现路径必须落到同一组写入**，否则「付款开通了什么」会因为
+    是谁先注意到而不同。幂等守卫（条件 UPDATE）让它们可以互相竞争而不出错——
+    对账任务输掉与回调的竞争是**允许的**，它本来就是补偿。
+  - **provider 由调用方传入**：领域层只能 import `payments/base.py`（分层测试
+    盯着这一条），registry 留在 workers 那一侧。
+  - `query_status` 的真实实现属于 D9（ABA），但**逻辑现在就能用 FakeProvider
+    验证**——它的 order_id 标记正是为这几条分支准备的。
+- 回退成本：低。
+- 影响范围：`services/subscriptions/`、`app/workers/`、`api/v1/payments.py`、D8b、D9。
+- 保障：变异 H（确认成功也不结算）、I（追太新的单）、J（把已结算的单也捞进来）、
+  K（立刻判定放弃）、L（永不判定放弃）、M（结算两次给两次）、N（订单详情读不出来时
+  静默变成别的档位）全部转红。
+
 ---
 
 # 遗留约束
@@ -1356,7 +1434,6 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 | L-5 | `OBJECT_STORAGE_ENDPOINT` 与 `PUBLIC_MEDIA_BASE_URL` 仍为空，**`Settings` 中必须保持可选**。声明为必填会让全 fake 配置启动失败，直接违反 G-B 验收。 | BACKLOG E6 / E7（真实对象存储） | 见 D-002；`core/config.py` |
 | L-7 | **按当前默认参数，`ease_factor` 必然在 mastery 还很低的时候就触底，复习间隔长期停在 1 天。** 算一遍：drill 权重 0.6、`MASTERY_DELTA_BASE=40`、及格线 60，则满分一次只加 0.6 分，要爬到 `MASTERY_LOW`(60) 需要约 100 次；而在那之前每一次都落在「reset」带里，每次扣 0.2 ease，**6 次后就到 `SM2_EASE_MIN`(1.3)**。也就是说间隔重复在默认配置下几乎不生效。算法实现没错（PRD 9.2 原样如此，见 D-015/D-016），错的是参数标定。**M0-1 拿到真实分数分布后，必须连同 `MASTERY_DELTA_BASE` 与三个权重一起重新标定**，不要只调 `SCORING_PASS_THRESHOLD`。 | M0-1 结论落地时；或第一次有人问「为什么所有概念天天都要复习」 | `services/mastery/sm2.py` 的 `schedule_review`；`core/config.py` 的 `mastery_delta_base` |
 
-| L-8 | **`LIMIT_FREE_DAILY_TASKS`（Free 每日 3 个任务）仍然没有任何消费者**，所以 Free 档的这条限额目前等于不存在。口径已不再是障碍：D-043 已定「一个任务 = 完成一节课」，剩下的只是接线——在 `POST /lessons/{id}/complete` 里扣一次 `consume_task`，额度不足返回 402。 | BACKLOG D8a（付费墙）。在那之前 Free 用户不受任务数限制，只受每日 10 句评分限制 | `services/entitlements/quota.py` 的 `consume_task` |
 | L-9 | **`streaks` 表没有任何写入方。** 它只在 PRD 第 9 节的表清单里出现过一次，没有任何 BACKLOG 条目、没有行为规格。完课是它最自然的写入点，但那属于扩范围（CLAUDE.md R6），所以 D4 没做。**要么补规格要么删表**——一张永远为空的表，会让后面每个读它的人先花时间确认它是不是坏了。项目所有者于 2026-09-19 确认**暂时留着不动**，不必再问一次。 | 有人要做连续打卡 / 留存激励时；或 M4 月报需要活跃度指标时 | `models/learning.py` 的 `Streak` |
 
 | L-10 | **PRD 11.3 的成本护栏（「超过档位上限 1.5 倍时告警并自动限流」）已认领：BACKLOG D10，排在 D8a 之后**（项目所有者 2026-09-19 决定；限流要决定降到哪一档，取决于订阅链路先跑通）。在它落地之前—— D5 把 `/admin/costs` 做出来了，但它只呈现花销，不比较上限、不告警、不限流。而 PRD 第 11 节把单位成本上限写成**硬约束**，M2 验收清单里也有「单用户月成本估算未超 `COST_CAP_BASIC_USD_CENTS_MONTHLY`」这一条——目前这条只能靠人去看看板。实现时必须同时处理 L-1（浮点比较要显式取整）。 | BACKLOG D10（D8a 之后，M2 验收之前） | `app/api/v1/admin.py` 的模块 docstring；`core/config.py` 的 `cost_alert_multiplier` |

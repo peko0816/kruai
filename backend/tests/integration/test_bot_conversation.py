@@ -312,6 +312,50 @@ async def test_an_internal_code_never_reaches_the_learner(
     assert "402" not in replies[0].text
 
 
+async def test_the_bot_moves_on_to_the_next_lesson(
+    conversation: Conversation, unit: dict[str, uuid.UUID], db: sa.Engine
+) -> None:
+    """The defect a real learner would have hit at the end of their first unit:
+    /learn handed back lesson one forever, and lesson two was unreachable."""
+    second = uuid.uuid4()
+    with db.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO lessons (id, course_id, concept_ids, sequence, title_km) "
+                "VALUES (:i, :c, :k, 2, 'មេរៀនទី ២')"
+            ),
+            {"i": second, "c": unit["course"], "k": [unit["concept"]]},
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO lesson_items (id, lesson_id, concept_id, item_type, payload, sequence) "
+                "VALUES (:i, :l, :c, 'drill', CAST('{\"target_text\": \"我要茶\"}' AS jsonb), 1)"
+            ),
+            {"i": uuid.uuid4(), "l": second, "c": unit["concept"]},
+        )
+
+    await conversation.on_learn(LEARNER)
+    for _ in range(3):
+        await conversation.on_voice(LEARNER, audio=AUDIO)
+
+    opened = await conversation.on_learn(LEARNER)
+
+    assert "មេរៀនទី ២" in opened[0].text
+
+
+async def test_a_learner_who_has_finished_everything_is_told_so(
+    conversation: Conversation, unit: dict[str, uuid.UUID]
+) -> None:
+    """Rather than being handed the first lesson again."""
+    await conversation.on_learn(LEARNER)
+    for _ in range(3):
+        await conversation.on_voice(LEARNER, audio=AUDIO)
+
+    replies = await conversation.on_learn(LEARNER)
+
+    assert "finished every lesson" in replies[0].text
+
+
 async def test_an_empty_catalogue_says_so(conversation: Conversation) -> None:
     replies = await conversation.on_learn(LEARNER)
 

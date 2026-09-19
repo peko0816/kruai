@@ -41,14 +41,13 @@ from app.core.config import Plan, Settings
 from app.core.errors import PaymentRefused
 from app.core.logging import get_logger
 from app.core.money import format_money
-from app.models.commerce import Payment, Subscription
+from app.models.commerce import Payment
 from app.services.entitlements import Entitlements
 from app.services.entitlements.pricing import (
     BILLING_PERIODS,
     PURCHASABLE_PLANS,
     BillingPeriod,
     UnpricedError,
-    period_end,
     price_for,
 )
 from app.services.payments.base import (
@@ -59,6 +58,7 @@ from app.services.payments.base import (
 )
 from app.services.payments.registry import get_payment_provider, provider_for_currency
 from app.services.provider_errors import ProviderConfigurationError
+from app.services.subscriptions import ORDER_DETAILS_FIELD, settle_order
 
 log = get_logger(__name__)
 
@@ -69,12 +69,10 @@ router = APIRouter(prefix="/payments", tags=["commerce"])
 #: their logs, so it carries nothing about who placed it.
 ORDER_ID_PREFIX = "kruai"
 
-#: Where our own order details live inside payments.raw_payload, namespaced so
-#: they cannot collide with whatever the acquirer sends back. The table has no
-#: column for "what was bought" and DATA_MODEL.sql is authoritative, so this is
-#: the place that does not require changing it (docs/DECISIONS.md D-053).
-ORDER_DETAILS_FIELD = "kruai_order"
-CALLBACK_FIELD = "provider_callback"
+#: Our order details live inside payments.raw_payload under a namespace of
+#: their own (docs/DECISIONS.md D-053). The name is defined once, in
+#: services/subscriptions, because the settling side has to read what this side
+#: wrote.
 
 
 class CheckoutIn(BaseModel):
@@ -336,106 +334,48 @@ async def _settle(
     mandate_ref: str | None,
     raw: dict[str, Any],
 ) -> bool:
-    """Move the payment to succeeded and grant what it bought, exactly once.
+    """Grant what the order bought, exactly once.
 
-    The conditional UPDATE is the whole idempotency guarantee: an acquirer that
-    retries — and they all do — finds the row already settled, gets no row
-    back, and grants nothing. Returns True when this call was the one that
-    settled it.
+    The writing itself is services/subscriptions, because the reconciliation
+    job settles the same orders when a callback is lost and the two must end in
+    identical rows (app/workers/payments.py).
     """
     now = datetime.datetime.now(datetime.UTC)
-    claimed = await session.execute(
-        sa.update(Payment)
-        .where(Payment.order_id == order_id, Payment.status != PaymentStatus.SUCCEEDED.value)
-        .values(status=PaymentStatus.SUCCEEDED.value, provider_ref=provider_ref, updated_at=now)
-        .returning(Payment.user_id, Payment.raw_payload)
+    settlement = await settle_order(
+        session,
+        provider=provider,
+        order_id=order_id,
+        provider_ref=provider_ref,
+        mandate_ref=mandate_ref,
+        raw=raw,
+        settings=settings,
+        now=now,
     )
-    row = claimed.one_or_none()
-    if row is None:
+    if not settlement.granted:
         # Either no such order, or it was settled already. Both are answered
         # with 200 and neither grants anything a second time.
         await session.rollback()
         return False
 
-    user_id, payload = row
-    # The acquirer's own payload is kept beside our order details rather than
-    # over them: reconciliation later wants both, and neither is the other's.
-    await session.execute(
-        sa.update(Payment)
-        .where(Payment.order_id == order_id)
-        .values(raw_payload={**(payload or {}), CALLBACK_FIELD: raw})
-    )
-    details = (payload or {}).get(ORDER_DETAILS_FIELD) or {}
-    plan: Plan = details.get("plan", "basic")
-    period: BillingPeriod = details.get("period", "monthly")
-
-    await _activate(
-        session,
-        settings=settings,
-        provider=provider,
-        user_id=user_id,
-        plan=plan,
-        period=period,
-        mandate_ref=mandate_ref,
-        now=now,
-    )
     await session.commit()
 
-    if plan == "pro":
+    if settlement.plan == "pro" and settlement.user_id is not None:
         # Bought with the subscription, and a balance rather than a daily
         # counter, so it is granted rather than reset (C4).
         entitlements = Entitlements(session_factory=session_factory, settings=settings)
         await entitlements.grant_realtime_seconds(
-            user_id, seconds=settings.limit_pro_realtime_seconds_monthly
+            settlement.user_id, seconds=settings.limit_pro_realtime_seconds_monthly
         )
 
     log.info(
         "payments.subscription_activated",
-        user_id=str(user_id),
+        user_id=str(settlement.user_id),
         order_id=order_id,
-        plan=plan,
-        period=period,
-        renewal_mode="auto" if (provider.supports_recurring and mandate_ref) else "manual",
+        plan=settlement.plan,
+        period=settlement.period,
+        renewal_mode=settlement.renewal_mode,
     )
     return True
-
-
-async def _activate(
-    session: AsyncSession,
-    *,
-    settings: Settings,
-    provider: PaymentProvider,
-    user_id: uuid.UUID,
-    plan: Plan,
-    period: BillingPeriod,
-    mandate_ref: str | None,
-    now: datetime.datetime,
-) -> None:
-    """Write the subscription row for a paid period.
-
-    ``renewal_mode`` is decided by what the channel can actually do, never
-    assumed (ARCHITECTURE 3.4). Auto also needs a mandate to charge against —
-    the database enforces that pairing — so a provider that supports recurring
-    but returned no mandate lands in manual, which is the recoverable side.
-    """
-    ends = period_end(now, period)
-    automatic = provider.supports_recurring and bool(mandate_ref)
-
-    await session.execute(
-        sa.insert(Subscription).values(
-            user_id=user_id,
-            plan=plan,
-            status="active",
-            renewal_mode="auto" if automatic else "manual",
-            period_start=now,
-            period_end=ends,
-            payment_provider=provider.name,
-            mandate_ref=mandate_ref if automatic else None,
-            # D8b drives both timers; the row has to carry the right one from
-            # the moment it exists or the first renewal is the one that is late.
-            next_charge_at=ends if automatic else None,
-        )
-    )
 
 
 __all__ = ["router"]
