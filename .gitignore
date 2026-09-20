@@ -34,3 +34,6 @@ pipeline/packs/*.tar.gz
 # Review samples go out to a reviewer and come back filled in; the filled-in
 # copy is evidence for M1 and belongs wherever that is kept, not in git.
 pipeline/packs/*.csv
+# Synthesised audio: regenerable from the draft, and a level is thousands of
+# files. import_pack.py is what puts them in object storage.
+pipeline/packs/*-media/
