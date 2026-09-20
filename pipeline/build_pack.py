@@ -204,6 +204,10 @@ async def build(
             tts_calls=synth.calls,
             tts_cost_usd_cents=synth.cost_usd_cents,
             reused=synth.reused,
+            # Carried forward, not recomputed: the generation happened once and
+            # import_pack.py is where both stages reach cost_ledger (D-084).
+            llm_calls=draft.usage.calls,
+            llm_cost_usd_cents=draft.usage.cost_usd_cents,
         ),
         concepts=tuple(concepts),
         media=synth.assets,
