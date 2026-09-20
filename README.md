@@ -30,9 +30,20 @@ make check                    # lint + format + mypy strict + pytest
 | `make jobs` | 跑一次定时任务（续费扣款、续费提醒、过期降级、支付对账） |
 | `make i18n` | 报告还有多少条翻译没写（不阻断） |
 | `make i18n-strict` | 上线闸门：还有占位符就失败 |
-| `make seed` | 校验 `pipeline/seed/` 的内容 seed，并报告还缺多少条高棉语解释 |
-| `make seed-strict` | M1 闸门：还有高棉语占位符就失败 |
 | `make sync` | 同步依赖 |
+
+内容管线（离线，不属于请求链路；完整说明见 [`pipeline/README.md`](pipeline/README.md)）：
+
+| 命令 | 作用 |
+|---|---|
+| `make seed` | 校验 `pipeline/seed/`，并报告还缺多少条高棉语解释 |
+| `make seed-strict` | M1 闸门：还有高棉语占位符就失败 |
+| `make generate` | 为每个 concept 生成内容草稿（LLM；默认 fake，计费 provider 需 `--confirm-spend`） |
+| `make validate` | 对草稿跑 PRD 6.2 的八条规则 |
+| `make review` | 导出母语者抽检用的 CSV（分层抽样） |
+| `make build` | 固化为 pack 并预生成音频（TTS；同样需要 `--confirm-spend`） |
+| `make import` | 把 pack 导入数据库并发布音频 |
+| `make wordlist` | 由转录表重建某一级的词表 |
 
 没起数据库时，schema 一致性的集成测试会跳过并提示；CI 里则会直接失败，不允许静默跳过。
 
@@ -61,6 +72,7 @@ backend/          FastAPI 后端
 bot/              Telegram Bot
 pipeline/         内容生产管线（离线 CLI，不属于请求链路）
   seed/             人工录入的 concept 骨架，来源受 R7 白名单约束
+  wordlists/        各等级词表（由转录正本派生），规则 1 的数据
 interfaces/       规范性 Provider 接口，须原样复制，签名不得改
 docs/             规格与决策
 ```
@@ -80,6 +92,7 @@ docs/             规格与决策
 | [`docs/DEFINITION_OF_DONE.md`](docs/DEFINITION_OF_DONE.md) | PR 检查单、里程碑验收标准 |
 | [`docs/BACKLOG.md`](docs/BACKLOG.md) | 做什么、什么顺序、哪些被 M0 阻塞 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | PRD 未定义、由实施方自行决策的记录 |
+| [`docs/REAL_ENVIRONMENT.md`](docs/REAL_ENVIRONMENT.md) | **需要真实账号、真人、真钱的事**：顺序、前置、验收 |
 
 ---
 

@@ -189,3 +189,4 @@ PRD 第 11 节的档位成本上限是硬约束。写任何会产生调用的代
 | `docs/DEFINITION_OF_DONE.md` | PR 检查单、里程碑验收标准 |
 | `docs/BACKLOG.md` | 做什么、什么顺序、哪些被 M0 阻塞 |
 | `docs/DECISIONS.md` | 你自己追加的决策记录（初始为空） |
+| `docs/REAL_ENVIRONMENT.md` | 需要真实账号 / 真人 / 真钱的事项，按依赖排序。**代码做不动时先看它** |

@@ -16,8 +16,9 @@
 
 **全项目 35 / 50。到 M2（C 端可交付测试）35 / 39。**
 
-挡在 M2 前面的只剩三样：**阶段 E 的内容**（现在就能做）、
-**ABA 凭据**（M0-3）、**km/zh 文案**。`pipeline/` 现在有 seed schema 与校验器，还没有内容。
+挡在 M2 前面的只剩三样：**HSK1 的真实内容**（管线已就绪，缺 LLM key 与母语者）、
+**ABA 凭据**（M0-3）、**km/zh 文案**。三样都不是代码任务，
+清单与顺序见 `docs/REAL_ENVIRONMENT.md`。
 
 标记：
 - `[BLOCKED-M0]` —— 只实现接口与 Fake，真实实现留 `# TODO(M0-x)`
@@ -128,9 +129,10 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
 
-`[GATE]` **G-E / M1** ◐ 进行中：对照 M1 验收清单。
-注意 E1–E7 做完也不等于 M1 通过——清单里还要母语者 10% 抽检、
-以及真实 TTS 生成的音频上传对象存储（E8，被 M0-2 阻塞）。
+`[GATE]` **G-E / M1** ◐ 代码侧完成，M1 未过：E1–E7 全部落地，
+但 M1 的五条验收里只有最后一条（import 空库导入）是代码能给的。
+其余四条要真实 LLM 生成、母语者抽检、M0-2 的 TTS 选型与对象存储——
+**要办哪些事、什么顺序、谁来办，见 `docs/REAL_ENVIRONMENT.md`**。
 
 > E1 落地说明：seed 格式与校验器在 `pipeline/seed_schema.py`，R7 来源白名单在
 > `pipeline/seed_sources.py`，命令是 `make seed` / `make seed-strict`。
