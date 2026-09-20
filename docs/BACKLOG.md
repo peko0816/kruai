@@ -124,7 +124,7 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | E4 | ✅ #41 | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
 | E5 | ✅ #42 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
 | E6 | ✅ #43 | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
-| E7 | ✅ #PRNUM | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
+| E7 | ✅ #44 | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
 | E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
 
