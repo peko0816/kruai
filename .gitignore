@@ -31,3 +31,6 @@ node_modules/
 # Content pipeline outputs (large, regenerable)
 pipeline/packs/*.json
 pipeline/packs/*.tar.gz
+# Review samples go out to a reviewer and come back filled in; the filled-in
+# copy is evidence for M1 and belongs wherever that is kept, not in git.
+pipeline/packs/*.csv
