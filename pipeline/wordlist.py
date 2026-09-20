@@ -20,6 +20,7 @@ boundary is unenforced.
 
 from __future__ import annotations
 
+import itertools
 import re
 import unicodedata
 from collections.abc import Sequence
@@ -372,3 +373,73 @@ def _tones_agree(word: str, syllables: Sequence[str]) -> bool:
 
 def _is_han(character: str) -> bool:
     return "一" <= character <= "鿿" or character == "〇"
+
+
+#: Combining tone marks, in the order a Chinese dictionary sorts them. Neutral
+#: tone (no mark) sorts last, which is why it is 5 rather than 0.
+_TONE_MARKS: Final[dict[str, int]] = {
+    "̄": 1,  # macron
+    "́": 2,  # acute
+    "̌": 3,  # caron
+    "̀": 4,  # grave
+}
+
+
+def sort_key(entry: SourceEntry) -> tuple[str, tuple[tuple[str, int], ...]] | None:
+    """Where a row belongs in the table's own ordering, or None if unsplittable.
+
+    The table is a dictionary: syllable by syllable, letters first and then
+    tone, with neutral tone last. Checking a transcription against that order
+    is a third thing the pinyin column has to satisfy, independent of both the
+    numbering and the agreement with the characters — a misread syllable
+    usually lands in the wrong place.
+
+    Returns the head character alongside the key, because the table groups
+    homophones by character: every 地 word, then every 弟 word, then 第. Those
+    are the only points where the order legitimately steps backwards.
+    """
+    reading = entry.reading.split("|")[0].split(" / ")[0]
+    head = _TRAILING_NOTE.sub("", entry.word.split("|")[0])
+    head = head.replace(_ERHUA, "").replace("（", "").replace("）", "")
+    target = _plain(reading)
+
+    syllables = _split_syllables(head, target)
+    erhua = _ERHUA in entry.word
+    if syllables is None:
+        syllables = _split_syllables(head, target.removesuffix("r"))
+        erhua = erhua or syllables is not None
+    if syllables is None:
+        return None
+
+    key = [(_detone(syllable).lower(), _tone_of(syllable)) for syllable in syllables]
+    if erhua:
+        key.append(("r", 5))
+    return head[:1], tuple(key)
+
+
+def _tone_of(syllable: str) -> int:
+    for character in unicodedata.normalize("NFD", syllable):
+        if character in _TONE_MARKS:
+            return _TONE_MARKS[character]
+    return 5
+
+
+def order_breaks(entries: Sequence[SourceEntry]) -> list[tuple[SourceEntry, SourceEntry]]:
+    """Consecutive rows the table's own ordering cannot explain.
+
+    A step backwards is expected where the table moves from one homophone
+    character to the next — 男生 to 南, 坐下 to 做 — and nowhere else.
+    """
+    found: list[tuple[SourceEntry, SourceEntry]] = []
+    for previous, current in itertools.pairwise(entries):
+        before, after = sort_key(previous), sort_key(current)
+        if before is None or after is None:
+            found.append((previous, current))
+            continue
+        (head_before, key_before), (head_after, key_after) = before, after
+        if key_after >= key_before:
+            continue
+        if key_before[:1] == key_after[:1] and head_before != head_after:
+            continue
+        found.append((previous, current))
+    return found

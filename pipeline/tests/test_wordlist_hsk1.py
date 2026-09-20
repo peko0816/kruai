@@ -29,6 +29,7 @@ from pipeline.wordlist import (
     SourceEntry,
     expand_source,
     load_wordlist,
+    order_breaks,
     pinyin_agrees,
     read_source,
     uncovered,
@@ -62,6 +63,51 @@ def test_every_row_agrees_with_its_own_pinyin(entries: list[SourceEntry]) -> Non
     ]
 
     assert disagreeing == []
+
+
+def test_the_table_is_in_the_order_the_standard_prints_it(entries: list[SourceEntry]) -> None:
+    """A third check, independent of the other two.
+
+    The table is a dictionary: by syllable, then by tone, with homophones
+    grouped under their head character. A misread syllable usually lands in
+    the wrong place, and that is visible without knowing what the right
+    answer was. All 500 rows are in order; the only backward steps are the
+    16 places the table moves to the next homophone character (地 to 弟 to
+    第, 坐下 to 做).
+    """
+    unexplained = [
+        f"{before.number} {before.word} -> {after.number} {after.word}"
+        for before, after in order_breaks(entries)
+    ]
+
+    assert unexplained == []
+
+
+def test_a_row_transcribed_into_the_wrong_place_is_noticed(
+    entries: list[SourceEntry],
+) -> None:
+    """The counterpart: the order check has to be able to fail."""
+    misplaced = [*entries[:100], entries[400], *entries[100:]]
+
+    assert order_breaks(misplaced) != []
+
+
+def test_the_same_character_may_appear_twice_with_different_readings(
+    entries: list[SourceEntry],
+) -> None:
+    """地 de and 地 dì are two rows, not a duplicated one (and so are 干, 还).
+
+    Worth asserting rather than assuming: a duplicate check that reported
+    those would have been switched off, and one that ignores the reading
+    would not notice a genuinely repeated row.
+    """
+    pairs = [(entry.word, entry.reading) for entry in entries]
+    repeated_characters = {
+        entry.word for entry in entries if [e.word for e in entries].count(entry.word) > 1
+    }
+
+    assert len(set(pairs)) == len(pairs)
+    assert repeated_characters == {"地", "干", "还"}
 
 
 def test_the_word_list_is_exactly_the_expansion_of_the_table(entries: list[SourceEntry]) -> None:
