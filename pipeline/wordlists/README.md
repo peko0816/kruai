@@ -24,7 +24,17 @@ data is worse than no rule, because the build goes green.
 
 ## What is here
 
-Nothing yet. `zh/hsk1.txt` is the one the HSK1 draft needs; the word tables of
-GF 0025-2021 are inside the R7 whitelist (public national standard), and the
-level-1 table numbers its 500 entries, which is what makes an extraction
-checkable — see docs/DECISIONS.md D-089.
+`zh/hsk1.txt` — the 500 words of the standard's level-1 table, expanded to 517
+forms (a row like `爸爸|爸` is two words, `好玩ㄦ` is two spellings).
+
+It is **derived**, not typed: `zh/hsk1.source.tsv` holds the transcription of
+record — number, word and pinyin as the table prints them — and `make wordlist`
+expands it. A correction goes into the table; editing the list by hand fails a
+test.
+
+Two checks stand behind the transcription (docs/DECISIONS.md D-091), both in
+`pipeline/tests/test_wordlist_hsk1.py`: the numbering must run 1–500 unbroken,
+and every row's characters must agree with its own pinyin column under
+`pypinyin` — two independently read columns confirming each other. Neither
+makes it certainly right; they make the remaining ways to be wrong narrow and
+named.

@@ -118,6 +118,11 @@ ignore = [
 # test count characters and strip punctuation, so a fixture written with ASCII
 # marks would be exercising something the content will never contain.
 "../pipeline/tests/*.py" = ["RUF001"]
+# wordlist.py documents the notation of a Chinese word table — 爸爸|爸,
+# 白（形）, 好玩ㄦ — where the fullwidth brackets and the ideographic zero
+# are the subject, not a typo for their ASCII lookalikes. Rewriting them
+# would make the documentation describe a different table.
+"../pipeline/wordlist.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 # The local backend/alembic/ directory makes ruff read the installed `alembic`

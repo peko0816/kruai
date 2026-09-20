@@ -21,6 +21,8 @@ boundary is unenforced.
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -33,7 +35,8 @@ WORDLIST_DIR: Final = _ROOT / "pipeline" / "wordlists"
 #: latin letters and spaces. Everything else has to be covered by the list.
 _SKIPPABLE: Final = re.compile(
     "[\\s0-9A-Za-z"
-    "\\u3000-\\u303f"  # CJK punctuation
+    "\\u2000-\\u206f"  # general punctuation: the curly quotes around 引语
+    "\\u3000-\\u303f"  # CJK punctuation: 。，、；：！？「」
     "\\uff00-\\uffef"  # fullwidth forms
     "!-/:-@\\[-`{-~"  # ASCII punctuation
     "]"
@@ -146,3 +149,226 @@ def uncovered(sentence: str, wordlist: Wordlist) -> list[str]:
     if current:
         leftovers.append("".join(current))
     return leftovers
+
+
+# --------------------------------------------------------- the source table
+#
+# A word list is derived from a transcription of the standard's table, kept
+# beside it as `<level>.source.tsv`. Deriving rather than typing the list twice
+# is what lets a test assert the two agree: a correction goes into the
+# transcription, and anything that did not come from the table cannot appear in
+# the list.
+
+
+@dataclass(frozen=True)
+class SourceEntry:
+    """One numbered row of the table, as printed."""
+
+    number: int
+    #: The word column, with the notation the table uses: 爸爸|爸, 白（形）,
+    #: 好玩ㄦ, 有（一）些.
+    word: str
+    #: The pinyin column, with its own notation: bāng//máng, chū/·lái.
+    reading: str
+
+
+#: Part-of-speech and example annotations, always at the end of the word.
+_TRAILING_NOTE: Final = re.compile(r"（[^）]*）$")
+
+#: An optional element *inside* a word — 有（一）些 — where both forms are words
+#: in their own right. Position is what distinguishes it from an annotation.
+_INNER_OPTION: Final = re.compile(r"^(.*?)（([^）]*)）(.+)$")
+
+#: The table writes erhua as a small 儿. Both spellings occur in real text.
+_ERHUA: Final = "ㄦ"
+
+
+def read_source(path: Path) -> list[SourceEntry]:
+    """Read a transcription table: number, word, reading, tab separated."""
+    entries: list[SourceEntry] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        number, word, reading = line.split("\t")
+        entries.append(SourceEntry(number=int(number), word=word, reading=reading))
+    return entries
+
+
+def expand_entry(word: str) -> tuple[str, ...]:
+    """Every form of one table row, in the order they should be written out.
+
+    The table's notation carries three different things and they expand
+    differently, which is why this is a function with tests rather than a
+    regular expression at a call site:
+
+        爸爸|爸     -> both, they are alternative words
+        白（形）    -> 白, the bracket is a part of speech
+        有（一）些  -> 有些 and 有一些, the bracket is part of the word
+        好玩ㄦ      -> 好玩 and 好玩儿, both spellings occur
+    """
+    forms: list[str] = []
+    for variant in word.split("|"):
+        variant = _TRAILING_NOTE.sub("", variant).strip()
+        if not variant:
+            continue
+
+        candidates = [variant]
+        inner = _INNER_OPTION.match(variant)
+        if inner:
+            before, optional, after = inner.groups()
+            candidates = [f"{before}{after}", f"{before}{optional}{after}"]
+
+        for candidate in candidates:
+            if _ERHUA in candidate:
+                base = candidate.replace(_ERHUA, "")
+                forms.extend([base, f"{base}儿"])
+            else:
+                forms.append(candidate)
+
+    # Order-preserving dedup: 零|〇 and a repeated form should appear once.
+    seen: dict[str, None] = {}
+    for form in forms:
+        seen.setdefault(form, None)
+    return tuple(seen)
+
+
+def expand_source(entries: Sequence[SourceEntry]) -> tuple[str, ...]:
+    """Every word form in a table, table order, each appearing once."""
+    forms: dict[str, None] = {}
+    for entry in entries:
+        for form in expand_entry(entry.word):
+            forms.setdefault(form, None)
+    return tuple(forms)
+
+
+def pinyin_agrees(word: str, reading: str) -> bool:
+    """Do a row's characters and its own pinyin column describe the same word?
+
+    The two columns were read separately from a scan, so a misread character
+    is very unlikely to still match the pinyin beside it. This is that check,
+    and it is here rather than in a one-off script because the next level's
+    transcription will want it too.
+
+    Two passes, and the split is the point. The syllables must first line up
+    with the characters ignoring tone, which is what a misread character
+    breaks. Then tone is judged syllable by syllable, allowing only the two
+    differences the table really has: neutral tone written without a mark
+    (爸爸 bàba against the dictionary's bàbà), and the sandhi tones of 不 and
+    一 (bú dà, yìxiē).
+
+    Accepting any tone difference would be simpler and would leave this blind
+    to tone altogether — which is what a mutation demonstrated before it was
+    written this way.
+    """
+    if "|" in word:
+        # 爸爸|爸 with bàba|bà: two words on one row, each with its own reading.
+        readings = reading.split("|")
+        variants = word.split("|")
+        if len(readings) != len(variants):
+            return False
+        return all(
+            pinyin_agrees(variant, variant_reading)
+            for variant, variant_reading in zip(variants, readings, strict=True)
+        )
+
+    target = _plain(reading)
+    if " / " in reading:  # 谁 shéi / shuí: alternative readings, not a sequence
+        target = _plain(reading.split(" / ")[0])
+    stripped = word.replace(_ERHUA, "")
+    stripped = _TRAILING_NOTE.sub("", stripped).replace("（", "").replace("）", "")
+
+    for candidate in (target, target.removesuffix("r")):
+        syllables = _split_syllables(stripped, candidate)
+        if syllables is not None and _tones_agree(stripped, syllables):
+            return True
+    return False
+
+
+def _plain(reading: str) -> str:
+    """The pinyin column with the table's notation removed."""
+    for noise in ("//", "/", "·", "(", ")", "（", "）", "'", "’", " "):
+        reading = reading.replace(noise, "")
+    return reading.lower()
+
+
+def _detone(syllables: str) -> str:
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFD", syllables)
+        if unicodedata.category(character) != "Mn"
+    )
+
+
+#: Characters whose tone changes with what follows, so the table's mark
+#: legitimately differs from the citation tone. 不 and 一 are the two the
+#: standard writes that way (bú dà, yìxiē).
+_SANDHI: Final = frozenset("不一")
+
+
+def _readings(word: str) -> list[list[str]]:
+    # errors="ignore" drops anything that is not a Han character, which is
+    # what we want: a row's pinyin describes its characters, and a stray
+    # bracket has no reading to compare.
+    from pypinyin import Style, pinyin
+
+    return pinyin(word, style=Style.TONE, heteronym=True, errors="ignore")
+
+
+def _split_syllables(word: str, target: str) -> list[str] | None:
+    """Cut ``target`` into one syllable per character, ignoring tone.
+
+    Returns the pieces of the table's own pinyin so the caller can judge their
+    tones separately; None when no cut lines up, which is what a misread
+    character looks like.
+    """
+    readings = _readings(word)
+
+    def walk(index: int, rest: str, taken: list[str]) -> list[str] | None:
+        if index == len(readings):
+            return taken if rest == "" else None
+        for reading in readings[index]:
+            bare = _detone(_plain(reading))
+            if not bare or not _detone(rest).startswith(bare):
+                continue
+            piece = _take(rest, len(bare))
+            found = walk(index + 1, rest[len(piece) :], [*taken, piece])
+            if found is not None:
+                return found
+        return None
+
+    return walk(0, target, [])
+
+
+def _take(text: str, bare_length: int) -> str:
+    """The prefix of ``text`` that is ``bare_length`` long once tones are stripped."""
+    for size in range(bare_length, len(text) + 1):
+        if len(_detone(text[:size])) == bare_length:
+            return text[:size]
+    return text
+
+
+def _tones_agree(word: str, syllables: Sequence[str]) -> bool:
+    """Does every syllable carry a tone that character can have?
+
+    Two differences are allowed and no others: a syllable written with no tone
+    mark at all is neutral tone, and 不 and 一 are written with their sandhi
+    tone. Allowing any difference would make the whole check blind to tone.
+    """
+    readings = _readings(word)
+    characters = [character for character in word if _is_han(character)]
+
+    for index, syllable in enumerate(syllables):
+        if index >= len(readings):
+            return False
+        if syllable in {_plain(reading) for reading in readings[index]}:
+            continue
+        if syllable == _detone(syllable):
+            continue
+        if index < len(characters) and characters[index] in _SANDHI:
+            continue
+        return False
+    return True
+
+
+def _is_han(character: str) -> bool:
+    return "一" <= character <= "鿿" or character == "〇"

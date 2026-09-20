@@ -154,8 +154,9 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 > E4 落地说明：八条规则都是纯函数，`make validate DRAFT=<path>` 跑它们。
 > 决策：D-088（去重按句子种类分组）、D-089（词表是数据、缺失即硬失败、
 > 用词表自身最长匹配分词）、D-090（拼音接受多音字全部读音）。
-> **遗留：`pipeline/wordlists/zh/hsk1.txt` 还没有，规则 1 跑不了真实数据**——
-> `make validate` 现在退出码 2，这是刻意的（DECISIONS 的 L-11）。
+> HSK1 词表已录入（500 条，D-091），规则 1 可以跑真实数据；
+> 转录正本是 `pipeline/wordlists/zh/hsk1.source.tsv`，词表由 `make wordlist` 派生。
+> 遗留约束 L-11 就此解除。
 
 ---
 
