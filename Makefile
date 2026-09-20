@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate validate review wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate validate review build wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -29,6 +29,7 @@ help:
 	@echo "  make generate   draft the content for every seeded concept (LLM; fake by default)"
 	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
 	@echo "  make review     export the native-speaker review sample (DRAFT=<path>)"
+	@echo "  make build      freeze a draft into a pack with its audio (DRAFT=<path>)"
 	@echo "  make wordlist   rebuild a level's word list from its transcription table"
 
 sync:
@@ -119,6 +120,12 @@ DRAFT ?= $(CURDIR)/pipeline/packs/zh-HSK1.draft.json
 
 validate:
 	$(ROOT_RUN) -m pipeline.validate $(DRAFT)
+
+# Stage [5] (BACKLOG E6): freeze a draft into a pack and synthesise its audio.
+# Refuses a draft validate.py rejects, a billed TTS provider without
+# --confirm-spend, and --with-video (PRD 14: not before S2).
+build:
+	$(ROOT_RUN) -m pipeline.build_pack $(DRAFT)
 
 # Stage [4] (BACKLOG E5): draw the native-speaker review sample from a draft.
 # Writes a CSV beside the draft and prints what to send with it.

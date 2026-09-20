@@ -10,11 +10,11 @@
 | B Provider 抽象与 Fake | 6 | 6 | G-B 通过 |
 | C 领域层 | 7 | 7 | G-C 通过 |
 | D API 与 Bot | 12 | 10 | D9 等 M0-3，D11 等产品决策 |
-| **E 内容管线** | **9** | **5** | **在做。E1–E7 不被任何东西阻塞；下一个是 E6** |
+| **E 内容管线** | **9** | **6** | **在做。E1–E7 不被任何东西阻塞；下一个是 E7** |
 | F M3 实时语音 | 6 | 0 | G-D 之后 |
 | G M4 B 端 | 5 | 0 | G-D 之后 |
 
-**全项目 33 / 50。到 M2（C 端可交付测试）33 / 39。**
+**全项目 34 / 50。到 M2（C 端可交付测试）34 / 39。**
 
 挡在 M2 前面的只剩三样：**阶段 E 的内容**（现在就能做）、
 **ABA 凭据**（M0-3）、**km/zh 文案**。`pipeline/` 现在有 seed schema 与校验器，还没有内容。
@@ -123,7 +123,7 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | E3 | ✅ #39 | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
 | E4 | ✅ #41 | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
 | E5 | ✅ #42 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
-| E6 | — | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
+| E6 | ✅ #PRNUM | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
 | E7 | — | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
 | E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
@@ -160,6 +160,12 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 >
 > E5 落地说明：`make review` 导出抽样 CSV。**分层抽样**（高棉语解释单独一层，
 > 落实 D-081）、每层至少一行、可复现、utf-8-sig、判定三档——理由见 D-093。
+>
+> E6 落地说明：`make build` 固化 pack + 预生成音频。决策见 D-094（未过校验默认不打包，
+> 强行打包在 pack 里留痕，E7 据此拒绝）、D-095（音频按 text+voice+rate 内容寻址，
+> 即 `source_text_hash`；pack 另有 checksum）、D-096（`--with-video` 存在但拒绝执行）。
+> **留给 E7 的一个决定**：pack 只固化 concept，课程编排（courses / lessons /
+> lesson_items 怎么切、一课放几个 concept）还没定，入库时必须决定并记录。
 
 ---
 
