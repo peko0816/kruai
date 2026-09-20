@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate validate wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -27,6 +27,8 @@ help:
 	@echo "  make seed       validate the content seed files"
 	@echo "  make seed-strict  also fail while a Khmer explanation is a placeholder (M1 gate)"
 	@echo "  make generate   draft the content for every seeded concept (LLM; fake by default)"
+	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
+	@echo "  make wordlist   rebuild a level's word list from its transcription table"
 
 sync:
 	$(UV) sync --directory $(BACKEND) --all-groups
@@ -107,6 +109,20 @@ seed-strict:
 # start without --confirm-spend (docs/DECISIONS.md D-085).
 generate:
 	$(ROOT_RUN) -m pipeline.generate
+
+# Stage [3] (BACKLOG E4): the eight rules of PRD 6.2 over a generated draft.
+# Exits 2 when the level has no word list — rule 1 must not pass by default.
+# Absolute: the recipes run with the working directory moved to backend/,
+# so a repository-relative path would resolve to the wrong place.
+DRAFT ?= $(CURDIR)/pipeline/packs/zh-HSK1.draft.json
+
+validate:
+	$(ROOT_RUN) -m pipeline.validate $(DRAFT)
+
+# Regenerates pipeline/wordlists/<lang>/<level>.txt from the transcription
+# table beside it. The list is derived; corrections go into the table.
+wordlist:
+	$(ROOT_RUN) -m pipeline.build_wordlist
 
 clean:
 	rm -rf $(BACKEND)/.venv $(BACKEND)/.mypy_cache $(BACKEND)/.pytest_cache $(BACKEND)/.ruff_cache

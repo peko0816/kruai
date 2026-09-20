@@ -47,7 +47,7 @@ concepts:
 
   - slug: zh.hsk1.locative_nouns
     standard_ref: 一01
-    pattern: "[名词] + 上/下/里/外/前/后/东边/南边…"
+    pattern: "[名词] + 上/下/里/外/前/后/左/右/东/南/西/北；及 上边/下边/里边/外边/前边/后边/左边/右边/东边/南边/西边/北边"
     km_explanation: "[[km:concept.zh.hsk1.locative_nouns]]"
     hskk_task_types: [listen_and_repeat, listen_and_answer]
     example_sentences:
@@ -107,7 +107,7 @@ concepts:
 
   - slug: zh.hsk1.numerals
     standard_ref: 一07
-    pattern: "一~一百；零、半"
+    pattern: "一、二/两、三、四、五、六、七、八、九、零；十、百；半"
     km_explanation: "[[km:concept.zh.hsk1.numerals]]"
     hskk_task_types: [listen_and_repeat]
     example_sentences:
@@ -467,7 +467,7 @@ concepts:
 
   - slug: zh.hsk1.money_expression
     standard_ref: 一43
-    pattern: "[数] + 块 / 毛 / 分"
+    pattern: "[数] + 块/元（+ [数] + 毛 + [数] + 分）"
     km_explanation: "[[km:concept.zh.hsk1.money_expression]]"
     hskk_task_types: [listen_and_repeat, listen_and_answer]
     example_sentences:
@@ -477,7 +477,7 @@ concepts:
 
   - slug: zh.hsk1.time_expression
     standard_ref: 一44
-    pattern: "[年月日星期]；[点分] + 半 / 差"
+    pattern: "[数]年[数]月[数]日/号；星期一–星期六、星期日/星期天；[数]点[数]分、[数]点半、差[数]分[数]点"
     km_explanation: "[[km:concept.zh.hsk1.time_expression]]"
     hskk_task_types: [listen_and_repeat, listen_and_answer]
     example_sentences:

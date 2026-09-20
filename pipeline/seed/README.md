@@ -74,10 +74,10 @@ and rejected on any other language — HSKK grades Chinese.
 | `listen_and_retell` | 听后复述 | 高级 |
 | `read_aloud` | 朗读 | 高级 |
 
-These six are written from the syllabus, not checked line by line against
-an exam-board document (docs/DECISIONS.md D-080). Confirm them once during
-the M1 content review; a correction is a change to the `HskkTaskType`
-literal and this table.
+Checked against two independent descriptions of the exam on 2026-09-20, down
+to the question counts (docs/DECISIONS.md D-080). Note the advanced paper's
+first part: it is 听后复述, *retelling*, not the 听后重复 of the lower levels —
+some sources conflate the two.
 
 ## Where material may come from
 

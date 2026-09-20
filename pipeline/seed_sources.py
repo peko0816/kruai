@@ -50,6 +50,17 @@ class Source:
 
 #: The whitelist of PRD section 5.5, enumerated. Grouped by the PRD subsection
 #: each entry comes from so the two can be read side by side.
+#:
+#: **Licence strings are a rights claim, so where they came from matters.**
+#: Three were checked against the rights holder's own words (2026-09-20):
+#: kh.moeys.oer states CC-BY 3.0 on oer.moeys.gov.kh, corpus.tatoeba states
+#: CC BY 2.0 FR on its downloads page, and corpus.cc_cedict states CC-BY-SA
+#: **3.0** — the PRD says only "CC-BY-SA", and this registry said 4.0 until
+#: that check. The rest carry a status rather than a licence — a national
+#: standard, an examination syllabus, a published word list — which is what
+#: PRD 5.5 permits them as, not a statement that somebody read their terms.
+#: Before any of the English-side entries is actually built on, check them:
+#: "public word list" is our shorthand, not Oxford's.
 ALLOWED_SOURCES: Final[tuple[Source, ...]] = (
     # --- 5.1 Chinese ------------------------------------------------------
     Source(
@@ -138,7 +149,7 @@ ALLOWED_SOURCES: Final[tuple[Source, ...]] = (
     Source(
         id="corpus.cc_cedict",
         title="CC-CEDICT Chinese-English dictionary",
-        licence="CC-BY-SA-4.0",
+        licence="CC-BY-SA-3.0",
         attribution_required=True,
         url="https://cc-cedict.org",
     ),
