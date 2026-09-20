@@ -2219,6 +2219,51 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 回退成本：低。S2 到来时把拒绝换成实现。
 - 影响范围：`pipeline/build_pack.py`。
 
+## D-097 只实现本地发布；配了对象存储端点就拒绝，而不是假装上传
+
+- 日期：2026-09-20
+- 背景：E7 要求「上传对象存储」。但 `OBJECT_STORAGE_ENDPOINT` 在现有所有配置里都是空的、
+  且必须保持可选（L-5 / D-002），而接真实 S3 需要引入厂商 SDK 与一层 provider 抽象，
+  M0 并没有把对象存储纳入范围。
+- 选择：实现一个 `LocalMediaStore`——写到目录，URL 用 `PUBLIC_MEDIA_BASE_URL` 拼。
+  **`OBJECT_STORAGE_ENDPOINT` 非空时直接抛错拒绝导入**，错误信息说清没实现。
+- 理由：三种做法里，「配了桶却偷偷写到本地磁盘」最糟——数据库会装满 404 的 URL，
+  而发现它的是学习者，不是这个函数。宁可在命令行上失败。
+- 回退成本：低。补一个 S3 实现，`get_media_store` 多一个分支。
+- 影响范围：`pipeline/storage.py`、`pipeline/import_pack.py`。
+
+## D-098 content pack 不可变：同一版本不覆盖，要改就发新版本
+
+- 日期：2026-09-20
+- 背景：重复导入同一个 pack 该怎么办，PRD 没写。
+- 选择：`content_packs` 已有 UNIQUE(language, level, version)；**发现同版本已存在就拒绝**，
+  无论 checksum 是否相同。想更新内容就换一个 version 字符串。
+- 理由：`attempts.lesson_item_id` 指向 `lesson_items`。覆盖导入意味着删掉再重建 lesson_items，
+  于是学习者已有的作答要么外键失败、要么指向别的内容。**那不是一次导入，那是一次迁移**，
+  需要单独设计和演练。拒绝是唯一不会悄悄弄坏历史数据的选择。
+- concept 是例外：按 slug **更新而非删除**（`concept_mastery` 挂在上面），所以掌握度跟着人走。
+- 回退成本：低。真要做替换时另写一个带迁移的命令。
+- 影响范围：`pipeline/import_pack.py`。
+
+## D-099 一个 concept 一课；课程与课时标题暂用中文句型，等高棉语文案
+
+- 日期：2026-09-20（由项目所有者拍板）
+- 背景：pack 只固化 concept，`courses` / `lessons` / `lesson_items` 怎么切没人定过。
+  这是入库后最难改的一件事——`lesson_progress` 与 `attempts` 一旦挂上去，重切就要迁移。
+- 选择：**一个 concept 一课**，顺序即 seed 的教学顺序（也就是大纲顺序）。
+  每课的 item 按 PRD 3.3 的运行顺序排：explain → drill×N → vocab×N → qa×N。
+  HSK1 因此是 48 课。
+- 备选与放弃原因：按附录 A 的章节合并成 10–12 课，单课时长更接近 PRD 的每日 10 分钟目标，
+  但一课多 concept 会让「完课」与 mastery 的关系需要额外定义，而那是另一处要拍板的地方。
+  项目所有者选了最保守的一一对应。
+- **用户可见文案的处理**：`courses.title_km` 用等级本身（"HSK1"），
+  `lessons.title_km` 用 concept 的中文句型（"我要 + [名词]"）。**没有编造高棉语**。
+  句型对中文学习者是有信息量的，等级名在证书上也是这么写的；
+  真正的高棉语标题属于文案交付物，和 i18n 占位符是同一批工作。
+- 回退成本：中。合并课程需要一次 `lessons` / `lesson_progress` 迁移——
+  所以建议等 M2 有真实完课率数据再决定要不要合并。
+- 影响范围：`pipeline/import_pack.py`。
+
 ---
 
 # 遗留约束
