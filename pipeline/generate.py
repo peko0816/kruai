@@ -37,6 +37,8 @@ from app.services.llm.base import CompletionResult, LLMProvider, Message, Purpos
 from app.services.llm.registry import get_llm
 from pipeline.draft import ConceptDraft, Draft, Failure, Usage
 from pipeline.seed_schema import SeedConcept, SeedError, SeedFile, load_seed_file
+from pipeline.validate import max_characters
+from pipeline.wordlist import Wordlist, load_wordlist
 
 _ROOT: Final = Path(__file__).resolve().parents[1]
 
@@ -93,9 +95,41 @@ SYSTEM_PROMPT: Final = (
     "4. Sentences must differ from one another in more than one word.\n"
     "5. Reproduce nothing from any textbook. Write original sentences for the "
     "pattern you are given.\n"
-    "\n"
-    "Answer with JSON matching the schema you are given, and nothing else."
 )
+
+#: Closes the system message, after the vocabulary when there is one.
+_ANSWER_INSTRUCTION: Final = (
+    "\nAnswer with JSON matching the schema you are given, and nothing else."
+)
+
+
+def system_prompt(wordlist: Wordlist | None = None) -> str:
+    """The system message, with the level's own vocabulary when we have it.
+
+    Rule 1 has always said "at or below the stated level" without saying what
+    that is, so the model had to guess from the level's name. It guesses
+    generously: the first real run put 椅 猫 瓶 狗 室 桌 停 公园 箱 into HSK1
+    sentences, and validate.py's rule 1 rejected every one of them.
+
+    The list goes in the system message rather than beside the concept because
+    it is the same ~1.5k tokens for all 48 calls of a level. Sent once per
+    concept in a stable prefix, a provider that caches prefixes bills it at the
+    cached rate from the second call on; sent with the concept, it would be
+    fresh input every time.
+
+    R7: this is the national standard's own word list (GF 0025-2021), which
+    `seed_sources.py` whitelists. No textbook's vocabulary selection reaches
+    the model here.
+    """
+    if wordlist is None:
+        return SYSTEM_PROMPT + _ANSWER_INSTRUCTION
+    return (
+        SYSTEM_PROMPT + "\nThe vocabulary of this level, which is the whole of what rule 1 "
+        "permits. Build every Chinese sentence from these words and no others:\n"
+        + " ".join(sorted(wordlist.words))
+        + "\n"
+        + _ANSWER_INSTRUCTION
+    )
 
 
 def response_schema(
@@ -180,6 +214,8 @@ def concept_messages(
     min_sentences: int = 0,
     min_substitutions: int = 0,
     min_dialogues: int = 0,
+    max_chars: int = 0,
+    wordlist: Wordlist | None = None,
 ) -> list[Message]:
     """The prompt for one concept. See the R7 block above before editing.
 
@@ -203,13 +239,25 @@ def concept_messages(
             f"{min_substitutions} substitution items and "
             f"{min_dialogues} dialogue tasks. Fewer than that is rejected."
         )
+    if max_chars:
+        # Said here because the first real run broke it on the one string that
+        # does not look like a sentence: a dialogue prompt whose instruction
+        # wording (an opening "please say after me") counts toward the limit as surely as the
+        # sentence after it does. The number comes from PIPELINE_MAX_CHARS_*,
+        # not from this file (R3).
+        lines.append(
+            f"No Chinese string may exceed {max_chars} Chinese characters, counting "
+            "punctuation as nothing. This includes a dialogue prompt, whose "
+            "instruction wording counts toward the limit together with the "
+            "sentence it introduces."
+        )
     if concept.example_sentences:
         lines.append(
             "Example sentences from the standard, for calibration of level and "
             "form (do not simply repeat them): " + " ".join(concept.example_sentences)
         )
     return [
-        Message(role="system", content=SYSTEM_PROMPT),
+        Message(role="system", content=system_prompt(wordlist)),
         Message(role="user", content="\n".join(lines)),
     ]
 
@@ -281,9 +329,24 @@ async def generate(
         "min_dialogues": settings.pipeline_min_dialogues_per_concept,
     }
 
+    # Refused rather than skipped, the same stance wordlist.py asks of every
+    # caller and validate.py already takes. Generating a level we cannot
+    # constrain produces a draft validate.py will reject on rule 1 — after the
+    # tokens are paid for.
+    wordlist = load_wordlist(seed.meta.language, seed.meta.level)
+
     for task_types, members in groups.items():
         results = await llm.batch_complete(
-            [concept_messages(concept, seed=seed, **counts) for concept in members],
+            [
+                concept_messages(
+                    concept,
+                    seed=seed,
+                    wordlist=wordlist,
+                    max_chars=max_characters(seed.meta.level, settings),
+                    **counts,
+                )
+                for concept in members
+            ],
             purpose=Purpose.OFFLINE_GENERATION,
             json_schema=response_schema(task_types=task_types, **counts),
         )

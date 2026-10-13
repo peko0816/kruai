@@ -109,6 +109,37 @@ def test_pinyin_that_matches_the_characters_passes() -> None:
     assert check_pinyin("我要水", "wǒ yào shuǐ", where="x") == []
 
 
+def test_pinyin_written_word_by_word_passes() -> None:
+    """GB/T 16159 joins a word's syllables: 书包 is shūbāo, not shū bāo.
+
+    Counting spaces made this rule reject every correctly written sentence the
+    first real model produced, while the hand-written seed — which spaced each
+    syllable — passed. The rule has to cut syllables, not split on spaces.
+    """
+    assert check_pinyin("书包在椅子上。", "shūbāo zài yǐzi shàng.", where="x") == []
+    assert check_pinyin("桌子上", "zhuōzi shàng", where="x") == []
+    assert check_pinyin("老师站在教室前边。", "lǎoshī zhàn zài jiàoshì qiánbian.", where="x") == []
+
+
+def test_pinyin_written_syllable_by_syllable_still_passes() -> None:
+    """The seed is written this way; both spellings are the same reading."""
+    assert check_pinyin("书包", "shū bāo", where="x") == []
+    assert check_pinyin("书包", "shūbāo", where="x") == []
+
+
+def test_a_wrong_syllable_inside_a_joined_word_is_still_caught() -> None:
+    """The point of the rule survives the fix: joining must not hide an error."""
+    problems = check_pinyin("书包", "shūbiāo", where="x")
+
+    assert rules(problems) == ["pinyin"]
+    assert "包" in problems[0].message
+
+
+def test_the_syllable_dividing_apostrophe_is_not_a_syllable() -> None:
+    """西安 is xī'ān; the apostrophe keeps it from reading as xian."""
+    assert check_pinyin("西安", "xī'ān", where="x") == []
+
+
 def test_pinyin_that_does_not_match_is_refused() -> None:
     problems = check_pinyin("我要水", "wǒ yào chá", where="x")
 
