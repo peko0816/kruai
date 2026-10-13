@@ -147,6 +147,7 @@
 | `PIPELINE_MIN_DIALOGUES_PER_CONCEPT` | `3` | |
 | `PIPELINE_DEDUP_THRESHOLD` | `0.9` | MinHash 相似度上限 |
 | `PIPELINE_MAX_OUTPUT_TOKENS` | `4096` | 单个 concept 的输出上限。2048 会截断 比 / 了2 |
+| `PIPELINE_MAX_CHARS_PROMPT_EXTRA` | `4` | 对话提示比句长上限多出的指令措辞预算 |
 | `PIPELINE_MAX_CHARS_HSK1` | `8` | |
 | `PIPELINE_MAX_CHARS_HSK2` | `12` | |
 | `PIPELINE_MAX_CHARS_HSK3` | `18` | |

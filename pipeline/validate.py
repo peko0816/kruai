@@ -393,7 +393,19 @@ def validate(draft: Draft, *, settings: Settings, wordlist: Wordlist) -> list[Vi
 
         for position, dialogue in enumerate(concept.dialogues):
             at = f"{where}.dialogues[{position}]"
-            problems += check_length(dialogue.prompt_zh, maximum=maximum, where=f"{at}.prompt_zh")
+            # The limit is about the sentence a beginner has to produce, which
+            # is the sample answer — and it was the one field nobody measured.
+            # A prompt is heard, not produced, and carries instruction wording
+            # on top of the sentence, so it gets that wording's budget and no
+            # more (PIPELINE_MAX_CHARS_PROMPT_EXTRA, D-109).
+            problems += check_length(
+                dialogue.prompt_zh,
+                maximum=maximum + settings.pipeline_max_chars_prompt_extra,
+                where=f"{at}.prompt_zh",
+            )
+            problems += check_length(
+                dialogue.sample_answer_zh, maximum=maximum, where=f"{at}.sample_answer_zh"
+            )
             problems += check_wordlist(dialogue.prompt_zh, wordlist, where=f"{at}.prompt_zh")
             problems += check_wordlist(
                 dialogue.sample_answer_zh, wordlist, where=f"{at}.sample_answer_zh"
