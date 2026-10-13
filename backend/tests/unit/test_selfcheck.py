@@ -277,3 +277,36 @@ def test_a_genuine_bug_in_a_factory_is_not_reported_as_misconfiguration(
 
     with pytest.raises(RuntimeError, match="a real bug inside the factory"):
         collect_problems(settings())
+
+
+# ------------------------------------------------- a deployment that sells nothing
+#
+# PAYMENTS_ENABLED=false is a legitimate configuration (D-100): a pilot can run
+# the free tier while the merchant application is still with a bank. What it
+# must not become is a way to reach "nothing can take money" by accident, which
+# is what the empty-PAYMENT_PROVIDERS check was always for.
+
+
+def payments(configured: Settings) -> list[CapabilityProblem]:
+    return [problem for problem in collect_problems(configured) if problem.adapter == "payments"]
+
+
+def test_a_deployment_may_declare_that_it_sells_nothing() -> None:
+    assert payments(settings(PAYMENTS_ENABLED="false", PAYMENT_PROVIDERS="")) == []
+
+
+def test_selling_nothing_while_listing_channels_is_refused() -> None:
+    """One of the two statements is stale, and guessing which is how a pilot
+    quietly takes money it cannot settle."""
+    problems = payments(settings(PAYMENTS_ENABLED="false", PAYMENT_PROVIDERS="fake"))
+
+    assert len(problems) == 1
+    assert "clear one or the other" in problems[0].detail
+
+
+def test_an_empty_channel_list_still_fails_when_payments_are_on() -> None:
+    """The original check, now saying what to do instead of only what is wrong."""
+    problems = payments(settings(PAYMENTS_ENABLED="true", PAYMENT_PROVIDERS=""))
+
+    assert len(problems) == 1
+    assert "PAYMENTS_ENABLED=false" in problems[0].detail

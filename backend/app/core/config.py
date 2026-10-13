@@ -139,6 +139,12 @@ class Settings(BaseSettings):
     tts_provider: str = "fake"
     llm_provider: str = "fake"
     payment_providers: Annotated[tuple[str, ...], NoDecode] = ("fake",)
+    #: Whether this deployment sells anything at all. False is a legitimate
+    #: configuration — a pilot can run the free tier while the merchant
+    #: application is still with a bank — but it has to be said out loud rather
+    #: than arrived at by leaving PAYMENT_PROVIDERS empty, which is the mistake
+    #: the startup self-check exists to catch (D-100).
+    payments_enabled: bool = True
     realtime_provider: str = "fake"
 
     # ------------------------------------------------------- 3. 评分与掌握度 [M0]

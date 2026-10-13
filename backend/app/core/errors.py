@@ -184,6 +184,22 @@ class AlreadySubscribed(AppError):
     http_status = 409
 
 
+class PaymentsUnavailable(AppError):
+    """This deployment does not sell anything (PAYMENTS_ENABLED=false).
+
+    503 rather than 404: the endpoint exists and will work once a channel is
+    configured, so "not right now" is the true answer. 402 would be worse — it
+    tells a learner to pay when there is no way to.
+
+    Its own code rather than a generic failure, because the client has to say
+    something different: "upgrade" is not an option a learner can act on here
+    (D-100).
+    """
+
+    code = "payment.unavailable"
+    http_status = 503
+
+
 class InsufficientQuota(AppError):
     """Daily attempt / task allowance or realtime seconds exhausted."""
 

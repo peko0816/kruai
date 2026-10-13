@@ -15,6 +15,7 @@
   "bot.lesson_stopped": "Lesson stopped. Send /learn to pick it up again.",
   "bot.no_content": "No lessons are available yet.",
   "bot.not_in_lesson": "No lesson in progress. Send /learn to start one.",
+  "bot.payments_unavailable": "Paid plans are not available yet. Everything in the free tier still works.",
   "bot.prompt_drill": "Say this: {text}",
   "bot.prompt_qa": "Answer out loud: {text}",
   "bot.prompt_vocab": "Say this: {text}",

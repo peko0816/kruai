@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
 from app.core.config import Plan, Settings
-from app.core.errors import AlreadySubscribed, PaymentRefused
+from app.core.errors import AlreadySubscribed, PaymentRefused, PaymentsUnavailable
 from app.core.logging import get_logger
 from app.core.money import format_money
 from app.models.commerce import Payment, Subscription
@@ -124,9 +124,16 @@ async def create_checkout(
     order we have no record of, which is not.
 
     Raises:
+        PaymentsUnavailable: this deployment does not sell (PAYMENTS_ENABLED=false).
         PaymentRefused: the plan cannot be bought, the currency is not one we
             accept or price, or the acquirer refused the order.
     """
+    if not settings.payments_enabled:
+        # Before anything else, including the currency check: a deployment that
+        # sells nothing should say so, rather than explain which currencies the
+        # nothing would be priced in (D-100).
+        raise PaymentsUnavailable()
+
     now = datetime.datetime.now(datetime.UTC)
     currency = (payload.currency or settings.default_currency).upper()
     _check_currency(currency, settings=settings)

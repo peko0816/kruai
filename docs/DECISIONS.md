@@ -2263,6 +2263,97 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 回退成本：中。合并课程需要一次 `lessons` / `lesson_progress` 迁移——
   所以建议等 M2 有真实完课率数据再决定要不要合并。
 - 影响范围：`pipeline/import_pack.py`。
+## D-100 「这个部署不卖东西」是一种合法配置，但必须明说
+
+- 日期：2026-10-13（由项目所有者拍板）
+- 背景：ABA 商户申请需要柬埔寨公司主体，而项目所有者没有。M2 的 11 条验收里
+  只有「ABA 收款」依赖支付通道，其余（免费档限额、付费墙、成本护栏、学习闭环）全都做完了。
+  于是「先只跑免费档做真实用户测试，支付延后」是条真路——但**今天做不到**：
+  启动自检把 `PAYMENT_PROVIDERS` 为空当作致命错误（"nothing can take money"），生产起不来。
+- 选择：新增 `PAYMENTS_ENABLED`（默认 `true`）。
+  - `false` + `PAYMENT_PROVIDERS` 为空 → 合法，正常启动
+  - `false` + 配了通道 → **启动失败**。两句话里有一句是过期的，猜哪一句，
+    就是一次「试运行悄悄收了结算不了的钱」
+  - `true` + 通道为空 → 仍然失败（原有检查），但错误信息现在会告诉你有 `PAYMENTS_ENABLED=false` 这个选项
+- **为什么不把「通道为空」直接当成声明**：那正是原来那条检查要防的事——
+  不能因为漏配而得到「没人能付钱」。要不卖，就明说。
+- 运行时行为：`/payments/checkout` 返回 **503 `payment.unavailable`**。
+  不是 402——402 是「你需要付钱」，而这里根本没有付钱的途径，对学习者是错的指示。
+  不是 404——端点存在，配上通道就能用。
+  Webhook 那半边不用改：没有通道时 `get_payment_provider` 本来就拒绝，
+  而「没有通道」意味着没有任何签名能通过验证。
+- 学习者看到的是新 key `bot.payments_unavailable`（三个 locale 都加了，km/zh 为占位符）：
+  「付费档位暂未开放，免费档的功能都可以正常使用。」
+- 回退成本：低。把 `PAYMENTS_ENABLED` 设回 `true` 并配上通道即可。
+- 影响范围：`core/config.py`、`core/errors.py`、`services/selfcheck.py`、
+  `api/v1/payments.py`、`bot/handlers.py`、三个 locale。
+
+## D-101 Telegram Stars 暂不做；M2 以免费档试运行
+
+- 日期：2026-10-13（提案与裁决同日）
+- 状态：**提案已提出，项目所有者裁决「先不做」。** 本条保留全文，
+  以免下一个人把同样的分析再做一遍——**要重新提起时，先读下面「要你权衡的代价」
+  与「一个真实的架构问题」两节，它们不会因为时间推移而失效。**
+- 裁决：M2 走 D-100 的免费档路线（`PAYMENTS_ENABLED=false`），
+  支付通道推迟到柬埔寨主体就位、ABA 商户资质下来之后再接。
+  Stars 作为备选留在案上，不排除。
+- **重新提起的触发条件**（任一）：
+  ① 免费档试运行证明了留存，需要开始验证付费意愿；
+  ② ABA 流程确认会拖过某个你不能接受的时间点；
+  ③ Telegram 调整费率或提现规则，使下面那笔毛利账改观。
+- 原提案全文如下。
+- 背景：ABA 需要柬埔寨主体（没有）；MoR 平台（Paddle / Lemon Squeezy / Polar / Dodo）
+  对柬埔寨卖家的资格查不到可靠结论，需要逐家问。
+  **Telegram Stars 是唯一能完全在线开通、不需要任何公司主体的通道**，
+  而且它本来就在 PRD 第 8 节的技术栈里列为「次」渠道。
+
+### PRD 第 14 节的排除理由，现在只剩两条成立
+
+| PRD 的理由 | 现状 |
+|---|---|
+| 无自动续订 | **已不成立**。Bot API 现在有 30 天周期订阅（`subscription_period`）、`editUserStarSubscription`，以及 `BotSubscriptionUpdated` 更新 |
+| 21 天锁定 | 仍然成立 |
+| 损耗 32% | 机制与 PRD 的描述不同：开发者侧是约 $0.013/star 的固定费率，30% 是**买家侧**的应用商店加价 |
+
+### 要你权衡的代价
+
+按 100 stars/月，开发者实收约 **$1.30**。PRD 11.2 的 Basic 是 $1.99 定价、
+$0.45 成本上限、目标毛利 ≥75%。$1.30 实收下毛利约 **65%**，**低于 PRD 的目标**。
+要么提高星数定价（买家实付更贵），要么接受这个毛利并修订 11.2。
+
+**以上费率数字来自二手资料，我没能取得 Telegram 官方开发者条款的完整版。
+签约或定价前必须核实：每星费率、提现的国别限制、锁定期与最低提现额。**
+
+### 一个真实的架构问题：Stars 的续费是「渠道自己续」
+
+ARCHITECTURE 3.4 只有两条路径：`auto`（我们到期发起扣款）与 `manual`（提醒用户再买一次）。
+Stars 订阅是**第三种**：Telegram 自己续，然后推一个新的 `successful_payment` 给我们。
+三个选项：
+
+1. 当成 `manual` —— 会给用户发他不需要的续费提醒，且会收到「意外到账」
+2. 当成 `auto`，`charge_recurring` 空实现 —— 对契约撒谎
+3. **加第三种 `renewal_mode`** —— 要改 `subscriptions` 的 CHECK 约束，一次 migration
+
+我倾向 3：ARCHITECTURE 3.3 已经预见过「出现第四种形态就扩契约，不要在业务层加分支」。
+但这是 schema 变更，请你一并批。
+
+### 好消息：`verify_callback` 的契约不用改
+
+Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
+`X-Telegram-Bot-Api-Secret-Token` 请求头认证——正好落进
+`verify_callback(headers, body, content_type)` 这个同步、无 IO 的形状。
+`createInvoiceLink` 返回的 `t.me/$...` 链接落进 `CheckoutResult.checkout_url`。
+金额用 XTR（0 位小数），正好是 `amount_minor` + `currency_minor_units=0`，不违反 R4。
+
+**provider 抽象在这里兑现了：换一个完全不同形态的收单方，业务层一行不动。**
+
+### 如果将来批准，要做的三件事
+
+1. 把裁决改回「采纳」，并在 PRD 第 14 节加一条修订说明
+2. 新增 BACKLOG 条目（Stars adapter），走正常的 PR 流程
+3. 实现 `services/payments/stars.py` + registry 一行 + 第三种 renewal_mode 的 migration
+
+**在那之前，PRD 第 14 节不动**——它现在仍然排除 Stars 订阅，而那与现状一致。
 
 ---
 

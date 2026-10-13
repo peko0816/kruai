@@ -151,10 +151,29 @@ def _payment_problems(settings: Settings) -> list[CapabilityProblem]:
     Building each provider also runs the ENV=prod guard, which is the check that
     stops a deployment from accepting callbacks signed with a published key.
     """
+    if not settings.payments_enabled:
+        # A deployment may legitimately sell nothing, but then it must not also
+        # list channels: one of the two statements is stale, and guessing which
+        # is how a pilot ends up quietly taking money it cannot settle (D-100).
+        if settings.payment_providers:
+            return [
+                CapabilityProblem(
+                    "payments",
+                    "any channel",
+                    "PAYMENTS_ENABLED=false but PAYMENT_PROVIDERS lists "
+                    f"{list(settings.payment_providers)}; clear one or the other",
+                )
+            ]
+        return []
+
     if not settings.payment_providers:
         return [
             CapabilityProblem(
-                "payments", "any channel", "PAYMENT_PROVIDERS is empty; nothing can take money"
+                "payments",
+                "any channel",
+                "PAYMENT_PROVIDERS is empty; nothing can take money. Set "
+                "PAYMENTS_ENABLED=false if this deployment is meant to run the "
+                "free tier only",
             )
         ]
 
