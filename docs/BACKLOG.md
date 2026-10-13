@@ -7,18 +7,25 @@
 | 阶段 | 条目 | 完成 | 说明 |
 |---|---|---|---|
 | A 地基 | 5 | 5 | G-A 通过 |
-| B Provider 抽象与 Fake | 6 | 6 | G-B 通过 |
+| B Provider 抽象与 Fake | 7 | 7 | G-B 通过；B7 为计划外 |
 | C 领域层 | 7 | 7 | G-C 通过 |
 | D API 与 Bot | 12 | 10 | D9 等 M0-3，D11 等产品决策 |
-| **E 内容管线** | **9** | **7** | **E1–E7 全部完成。E8/E9 等 M0** |
+| **E 内容管线** | **10** | **8** | **E1–E7 + E10 完成，HSK1 已生成并校验。E8/E9 等 M0** |
 | F M3 实时语音 | 6 | 0 | G-D 之后 |
 | G M4 B 端 | 5 | 0 | G-D 之后 |
 
-**全项目 35 / 50。到 M2（C 端可交付测试）35 / 39。**
+**全项目 37 / 52。到 M2（C 端可交付测试）37 / 41。**
+（分母从 50 / 39 变为 52 / 41：B7 与 E10 是计划外但已交付的条目，记进来而不是记在脚注里。）
 
-挡在 M2 前面的只剩三样：**HSK1 的真实内容**（管线已就绪，缺 LLM key 与母语者）、
-**ABA 凭据**（M0-3）、**km/zh 文案**。三样都不是代码任务，
-清单与顺序见 `docs/REAL_ENVIRONMENT.md`。
+挡在 M2 前面的仍是三样，但第一样已经走了一多半：
+
+- **HSK1 的真实内容** —— LLM key 已拿到，48 个 concept 全部生成并经 8 条规则校验，
+  违规从 278 降到 78（修复轮 D-110）。剩下的 78 条已逐条给出替换建议，
+  待人工确认后批量应用。**真正缺的只剩母语者抽检**（`make review` 的 117 行）。
+- **ABA 凭据**（M0-3）—— 已裁决推迟，M2 以免费档交付（D-100 / D-101）
+- **km/zh 文案** —— 交接工具已就绪（`make i18n-export`，D-102），缺译者
+
+三样都不是代码任务，清单与顺序见 `docs/REAL_ENVIRONMENT.md`。
 
 标记：
 - `[BLOCKED-M0]` —— 只实现接口与 Fake，真实实现留 `# TODO(M0-x)`
@@ -58,6 +65,7 @@
 | B4 | ✅ #5 | `services/payments/`：同上结构，`FakePaymentProvider` 用固定 HMAC key 验签 | A3 | `verify_callback` 无副作用；`create_checkout` 幂等 |
 | B5 | ✅ #6 | registry 启动期能力自检：所配 provider 是否覆盖所需语言，不通过则启动失败 | B1–B4 | 故意配错 → 启动报错并指明缺哪个语言 |
 | B6 | ✅ #7 | `cost_ledger` 记账装饰器/上下文管理器；`COST_LEDGER_REQUIRED=true` 时未记账的外部调用抛异常 | A4 B1 | 写一个不记账的调用 → 测试捕获到异常 |
+| B7 | ✅ #48 | 真实 LLM adapter（`services/llm/openai.py`，走 httpx 不引厂商 SDK，`LLM_BASE_URL` 可指向任意兼容端点）。**计划外条目**：LLM 不在 M0 三项验证内，PRD 第 8 节已定档位，E3 要跑真实生成就必须有它（D-103） | B3 | 真实调用返回可解析 JSON；`LLM_PROVIDER=fake` 可退回 |
 
 `[GATE]` **G-B** ✅ 通过：全部 provider=fake，系统可启动，能力自检通过。
 
@@ -89,8 +97,8 @@
 | D4 | ✅ #21 #22 | `POST /lessons/{id}/complete` + `GET /review/queue` | C3 | 完课后 mastery 与队列正确更新 |
 | D5 | ✅ #23 #24 | `GET /me/entitlements` + `GET /admin/costs`（按 provider/用户/日聚合） | B6 C4 | 成本看板能看到 D3 产生的记账 |
 | D6 | ✅ #25 | Bot 会话状态机：讲解 → drill → vocab → Q&A → 完课；voice note 往返 | D2 D3 | 用 Fake Provider 在真实 Telegram 里走完一个单元 |
-| D7 | ✅ #26 | i18n 框架 + `locales/{km,zh,en}.json`；CI 检查 km 无占位符 | A3 | 内联字符串检查通过 |
-| D8a | ✅ #27 #28 #30 | 付费墙 + 下单收单：Free/Basic 限额生效；`POST /payments/checkout` + `POST /payments/webhook/{provider}`；`Money` 值对象与 `core/money.py` | B4 C4 | FakeProvider 下可完成一笔"支付"并开通订阅；验签失败拒绝开通；KHR（0 位小数）与 USD（2 位）都有单测 |
+| D7 | ✅ #26 #47 | i18n 框架 + `locales/{km,zh,en}.json`；CI 检查 km 无占位符 | A3 | 内联字符串检查通过 |
+| D8a | ✅ #27 #28 #30 #46 | 付费墙 + 下单收单：Free/Basic 限额生效；`POST /payments/checkout` + `POST /payments/webhook/{provider}`；`Money` 值对象与 `core/money.py` | B4 C4 | FakeProvider 下可完成一笔"支付"并开通订阅；验签失败拒绝开通；KHR（0 位小数）与 USD（2 位）都有单测 |
 | D8b | ✅ #29 | **订阅续费双路径**（ARCHITECTURE 3.4）：`renewal_mode` 状态机、grace 期、auto 扣款定时任务 + 重试、manual 提醒定时任务 + 防重复 | D8a | 两条路径各有集成测试；FakeProvider 可分别模拟 `supports_recurring` 为真/假；grace 到期正确降级 |
 | D9 | ⏸ M0-3（接口与契约已就位 #31） | `[BLOCKED-M0]` ABA PayWay 真实 adapter（含 `HASH_FIELD_ORDER` 核对） | D8a + M0-3 | 真实小额支付 + 回调验签通过 |
 | D10 | ✅ #32 | 成本护栏（PRD 11.3）：按用户按月累计 `cost_ledger`，超过档位上限 `COST_ALERT_MULTIPLIER` 倍时告警并自动限流。**比较必须显式取整**（L-1：`45 × 1.5 = 67.5`，67 算不算超标要人来定，不能让浮点序关系替你决定） | D5 D8a | 单测覆盖取整边界（恰好 67、恰好 68）；被限流的用户拿到 **429 `cost.cap_reached`**（不是 402——他已经付过钱了，续费解决不了成本超限，见 D-071）且不产生付费调用、不扣额度；告警可在日志与 `/admin/costs` 里看到 |
@@ -120,13 +128,14 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | # | 状态 | 任务 | 依赖 | 验收 |
 |---|---|---|---|---|
 | E1 | ✅ #37 | seed YAML schema 定义 + 校验器；`pipeline/seed/zh-hsk3.0/` 目录结构 | A1 | 非法 seed 被拒并指出具体字段 |
-| E2 | ✅ #38 | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
-| E3 | ✅ #39 | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
-| E4 | ✅ #41 | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
-| E5 | ✅ #42 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
+| E2 | ✅ #38 #40 | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
+| E3 | ✅ #39 #40 #49 #50 #51 | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
+| E4 | ✅ #41 #50 #51 #52 #53 | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
+| E5 | ✅ #42 #53 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
 | E6 | ✅ #43 | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
 | E7 | ✅ #44 | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
 | E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
+| E10 | ✅ #52 | `repair.py`（stage 4b）：只重问 validate.py 驳回的 concept，违规原文进 prompt，逐 concept 保留违规更少的那一版。**计划外条目**：原计划 generate 与 validate 之间没有东西，一份有违规的 draft 只能整体重生成（D-110） | E3 E4 | 实测 186 → 78；绝不让某个 concept 变差 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
 
 `[GATE]` **G-E / M1** ◐ 代码侧完成，M1 未过：E1–E7 全部落地，
