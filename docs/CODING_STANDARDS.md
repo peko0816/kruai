@@ -24,6 +24,17 @@
 **新增数据表不需要改测试**——重置的表清单是从数据库读回来的，
 `tests/integration/test_isolation.py` 会校验它与实际存在的表完全一致。
 
+**只跑 `bot/` 或 `pipeline/` 的测试时要带上 `-c pyproject.toml`：**
+
+```
+uv run --directory backend pytest ../pipeline/tests -q -c pyproject.toml
+```
+
+pytest 的 rootdir 是按命令行参数推出来的。只给 `../pipeline/tests` 时 rootdir 会落到仓库根，
+而仓库根没有配置文件，于是 **整个 `[tool.pytest.ini_options]` 都不生效**——
+包括 `asyncio_mode = "auto"`，async 测试会全部报「async def functions are not natively supported」，
+看起来像代码坏了。`make test` 不受影响（它不带路径参数）。
+
 ---
 
 ## 2. 类型

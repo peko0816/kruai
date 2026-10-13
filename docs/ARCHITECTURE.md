@@ -84,7 +84,13 @@ seed/*.yaml
   → import_pack.py 入库 + 上传对象存储 + 校验 sources/licence
 ```
 
-管线**不 import backend 的任何 service**，只共享 `models/` 的 schema 定义。
+管线**可以经 `base.py` 抽象使用适配层**（scoring / tts / payments / llm）与 `core/` 的配置，
+**不得 import 领域层**（mastery / media / entitlements / experiments）或 `api/`。
+理由：适配层就是「怎么调外部能力」，而管线本来就要调；领域层是运行时的业务判断，
+碰它才会产生真正的耦合。除此之外只共享 `models/` 的 schema 定义。
+
+> 此处原文曾写作「不 import backend 的任何 service」，与上面的数据流图自相矛盾
+> （图里 `generate.py` 就在调 `llm.batch_complete`）。按 D-086 改写为现在这条。
 
 ---
 
