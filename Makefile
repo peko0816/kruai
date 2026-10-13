@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair review build import wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair fixes review build import wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -29,6 +29,7 @@ help:
 	@echo "  make seed       validate the content seed files"
 	@echo "  make seed-strict  also fail while a Khmer explanation is a placeholder (M1 gate)"
 	@echo "  make generate   draft the content for every seeded concept (LLM; fake by default)"
+	@echo "  make fixes      the violations as a sheet to work through"
 	@echo "  make repair     re-ask the concepts validate.py rejected (LLM; fake by default)"
 	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
 	@echo "  make review     export the native-speaker review sample (DRAFT=<path>)"
@@ -135,6 +136,13 @@ DRAFT ?= $(CURDIR)/pipeline/packs/zh-HSK1.draft.json
 
 validate:
 	$(ROOT_RUN) -m pipeline.validate $(DRAFT)
+
+# The same violations as a sheet somebody works through one at a time. These
+# are Chinese-side problems; `make review` is the separate Khmer judgement.
+FIXES ?= $(CURDIR)/pipeline/packs/zh-HSK1.fixes.csv
+
+fixes:
+	$(ROOT_RUN) -m pipeline.validate $(DRAFT) --csv $(FIXES)
 
 # Stage [4b]: re-ask only the concepts validate.py rejected, with their own
 # violations in the prompt, keeping whichever version of each is better.
