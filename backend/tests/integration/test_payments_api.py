@@ -608,3 +608,58 @@ async def test_paying_does_not_move_a_learner_toward_the_throttle(
     assert rows("SELECT count(*) FROM cost_ledger") == [(20,)]
     assert spend == 0
     assert not is_over_threshold(spend, plan="free", settings=settings)
+
+
+# ------------------------------------------- a deployment that sells nothing
+#
+# D-100. The merchant application runs on a bank's clock; the free tier does
+# not have to wait for it. What has to hold is that only buying is off — the
+# learning the free tier allows still works, and the learner is told something
+# they can act on rather than being sent to a checkout that cannot exist.
+
+
+def free_tier_only(settings: Settings) -> Settings:
+    return settings.model_copy(update={"payments_enabled": False, "payment_providers": ()})
+
+
+async def test_checkout_is_unavailable_rather_than_refused(settings: Settings) -> None:
+    """503, not 402: 402 tells a learner to pay when there is no way to."""
+    async with client_for(free_tier_only(settings)) as client:
+        headers = await authenticated(client)
+        response = await checkout(client, headers=headers)
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "payment.unavailable"
+
+
+async def test_nothing_is_written_when_there_is_nothing_to_buy(
+    settings: Settings, rows: Rows
+) -> None:
+    async with client_for(free_tier_only(settings)) as client:
+        headers = await authenticated(client)
+        assert (await checkout(client, headers=headers)).status_code == 503
+
+    assert rows("SELECT id FROM payments") == []
+
+
+async def test_a_webhook_is_still_refused_with_no_channel_configured(
+    settings: Settings, rows: Rows
+) -> None:
+    """The open-internet half: no channel means no signature can ever verify."""
+    async with client_for(free_tier_only(settings)) as client:
+        response = await client.post("/api/v1/payments/webhook/fake", content=b"{}")
+
+    assert response.status_code == 400
+    assert rows("SELECT id FROM subscriptions") == []
+
+
+async def test_the_free_tier_still_works_when_nothing_is_for_sale(
+    settings: Settings,
+) -> None:
+    """The whole point of the configuration: learning continues, buying does not."""
+    async with client_for(free_tier_only(settings)) as client:
+        headers = await authenticated(client)
+        entitlements = await client.get("/api/v1/me/entitlements", headers=headers)
+
+    assert entitlements.status_code == 200
+    assert entitlements.json()["plan"] == "free"

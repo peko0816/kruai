@@ -37,6 +37,7 @@ log = get_logger(__name__)
 _ERROR_MESSAGE_KEYS: Final[dict[str, str]] = {
     "quota.insufficient": "bot.quota_exhausted",
     "payment.already_subscribed": "bot.already_subscribed",
+    "payment.unavailable": "bot.payments_unavailable",
     "scoring.unavailable": "bot.scoring_unavailable",
     "cost.cap_reached": "bot.cost_cap_reached",
     "attempt.item_not_scorable": "bot.error",

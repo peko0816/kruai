@@ -15,6 +15,7 @@
   "bot.lesson_stopped": "[[km:bot.lesson_stopped]]",
   "bot.no_content": "[[km:bot.no_content]]",
   "bot.not_in_lesson": "[[km:bot.not_in_lesson]]",
+  "bot.payments_unavailable": "[[km:bot.payments_unavailable]]",
   "bot.prompt_drill": "[[km:bot.prompt_drill]]",
   "bot.prompt_qa": "[[km:bot.prompt_qa]]",
   "bot.prompt_vocab": "[[km:bot.prompt_vocab]]",

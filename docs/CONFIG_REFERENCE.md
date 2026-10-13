@@ -48,6 +48,7 @@
 | `TTS_PROVIDER` | `fake` | `fake` / `azure` / `google` / `elevenlabs` |
 | `LLM_PROVIDER` | `fake` | `fake` / `openai` / `anthropic` |
 | `PAYMENT_PROVIDERS` | `fake` | 逗号分隔，可同时启用 `aba,bakong,stars` |
+| `PAYMENTS_ENABLED` | `true` | 这个部署卖不卖东西。`false` 是合法配置——商户资质还没下来时先跑免费档（D-100）——但那时 `PAYMENT_PROVIDERS` 必须为空，两者矛盾会在启动自检时失败。为 `false` 时 `/payments/checkout` 返回 503 `payment.unavailable` |
 | `REALTIME_PROVIDER` | `fake` | M3 启用 |
 
 > **全部设为 `fake` 时系统必须端到端跑通。** 这是 CI 的默认配置。
