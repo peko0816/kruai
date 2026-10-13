@@ -115,7 +115,14 @@ class PackConcept(BaseModel):
 
 
 class PackUsage(BaseModel):
-    """What the build cost. Becomes a cost_ledger row at import (D-084)."""
+    """What the content cost to make. Becomes cost_ledger rows at import.
+
+    Both stages are carried, not just this one: D-084 routes generation cost
+    through the draft and into the pack precisely so that import_pack.py — the
+    only stage with a database connection — can write both. A pack that
+    dropped the LLM figure would leave the generation permanently unledgered,
+    which CLAUDE.md section 8 treats as a call that never happened.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -123,6 +130,9 @@ class PackUsage(BaseModel):
     tts_cost_usd_cents: int = 0
     #: Clips that were reused rather than synthesised again.
     reused: int = 0
+    #: Copied from the draft that was built.
+    llm_calls: int = 0
+    llm_cost_usd_cents: int = 0
 
 
 class Pack(BaseModel):

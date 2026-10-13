@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate validate review build wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate validate review build import wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -30,6 +30,7 @@ help:
 	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
 	@echo "  make review     export the native-speaker review sample (DRAFT=<path>)"
 	@echo "  make build      freeze a draft into a pack with its audio (DRAFT=<path>)"
+	@echo "  make import     import a pack into the database (PACK=<path>)"
 	@echo "  make wordlist   rebuild a level's word list from its transcription table"
 
 sync:
@@ -131,6 +132,13 @@ build:
 # Writes a CSV beside the draft and prints what to send with it.
 review:
 	$(ROOT_RUN) -m pipeline.review_export $(DRAFT)
+
+# Stage [6] (BACKLOG E7): put a pack into the database and publish its audio.
+# Refuses an unvalidated pack, an edited one, and a version already imported.
+PACK ?= $(CURDIR)/pipeline/packs/zh-HSK1.pack.json
+
+import:
+	$(ROOT_RUN) -m pipeline.import_pack $(PACK)
 
 # Regenerates pipeline/wordlists/<lang>/<level>.txt from the transcription
 # table beside it. The list is derived; corrections go into the table.
