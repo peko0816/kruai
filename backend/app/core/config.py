@@ -288,6 +288,12 @@ class Settings(BaseSettings):
     #: mid-answer — a limit is a limit whether or not anyone chose it (R3), and
     #: a truncated answer costs the same as a whole one.
     pipeline_max_output_tokens: int = Field(default=4096, gt=0)
+    #: How much longer a dialogue prompt may be than the sentence limit, to
+    #: carry its instruction wording ("please say after me" is four characters).
+    #: The learner hears a prompt; the sentence they produce is the sample
+    #: answer, and that is held to the limit itself. Set to 0 for the old
+    #: behaviour, where the wording spent the sentence's budget.
+    pipeline_max_chars_prompt_extra: int = Field(default=4, ge=0)
     pipeline_max_chars_hsk1: int = Field(default=8, gt=0)
     pipeline_max_chars_hsk2: int = Field(default=12, gt=0)
     pipeline_max_chars_hsk3: int = Field(default=18, gt=0)

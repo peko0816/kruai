@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate review build import wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair review build import wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -29,6 +29,7 @@ help:
 	@echo "  make seed       validate the content seed files"
 	@echo "  make seed-strict  also fail while a Khmer explanation is a placeholder (M1 gate)"
 	@echo "  make generate   draft the content for every seeded concept (LLM; fake by default)"
+	@echo "  make repair     re-ask the concepts validate.py rejected (LLM; fake by default)"
 	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
 	@echo "  make review     export the native-speaker review sample (DRAFT=<path>)"
 	@echo "  make build      freeze a draft into a pack with its audio (DRAFT=<path>)"
@@ -134,6 +135,13 @@ DRAFT ?= $(CURDIR)/pipeline/packs/zh-HSK1.draft.json
 
 validate:
 	$(ROOT_RUN) -m pipeline.validate $(DRAFT)
+
+# Stage [4b]: re-ask only the concepts validate.py rejected, with their own
+# violations in the prompt, keeping whichever version of each is better.
+ROUNDS ?= 1
+
+repair:
+	$(ROOT_RUN) -m pipeline.repair --rounds $(ROUNDS)
 
 # Stage [5] (BACKLOG E6): freeze a draft into a pack and synthesise its audio.
 # Refuses a draft validate.py rejects, a billed TTS provider without

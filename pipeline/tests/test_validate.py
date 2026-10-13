@@ -556,3 +556,78 @@ def test_two_drill_sentences_that_differ_by_punctuation_are_still_refused() -> N
     )
 
     assert rules(problems) == ["duplicate"]
+
+
+# ------------------------------- rule 2 lands on the sentence, not the scaffolding
+#
+# The first full run put 10 of its 19 length violations on dialogue prompts
+# that were over by a character or two, while the sample answer — the sentence
+# a learner actually has to produce — was never measured at all (D-109).
+
+
+def a_dialogue(prompt: str, answer: str) -> dict[str, Any]:
+    return {
+        "hskk_task_type": "listen_and_repeat",
+        "prompt_zh": prompt,
+        "prompt_km": KM,
+        "sample_answer_zh": answer,
+    }
+
+
+def length_problems(prompt: str, answer: str, **overrides: Any) -> list[str]:
+    configured = settings(
+        pipeline_min_sentences_per_concept=1,
+        pipeline_min_substitutions_per_concept=1,
+        pipeline_min_dialogues_per_concept=1,
+        **overrides,
+    )
+    draft = a_draft(concepts=[a_concept(dialogues=[a_dialogue(prompt, answer)]).model_dump()])
+    words = a_wordlist(
+        "我",
+        "要",
+        "水",
+        "你",
+        "请",
+        "说",
+        "们",
+        "一",
+        "起",
+        "去",
+        "商",
+        "场",
+        "跟",
+        "下",
+        "好",
+        "吗",
+    )
+    return [
+        problem.where
+        for problem in validate(draft, settings=configured, wordlist=words)
+        if problem.rule == "length"
+    ]
+
+
+def test_the_sentence_a_learner_produces_is_measured() -> None:
+    """The gap: sample_answer_zh had no length rule on it at all."""
+    assert length_problems("请说：我要水", "我要水我要水我要水") == [
+        "concepts[0](zh.hsk1.want_noun).dialogues[0].sample_answer_zh"
+    ]
+
+
+def test_instruction_wording_does_not_spend_the_sentence_budget() -> None:
+    """A two-character "please say" plus a seven-character sentence is 9 against a limit of 8, and the
+    sentence inside it is 7. The prompt is heard, not produced."""
+    assert length_problems("请说：我们一起去商场", "我们一起去商场") == []
+
+
+def test_the_wording_budget_is_not_unlimited() -> None:
+    assert length_problems("请跟我说一下好吗：我们一起去商场", "我要水") == [
+        "concepts[0](zh.hsk1.want_noun).dialogues[0].prompt_zh"
+    ]
+
+
+def test_the_old_behaviour_is_one_setting_away() -> None:
+    """R3, and the way back: 0 spends the wording out of the sentence's budget."""
+    assert length_problems(
+        "请说：我们一起去商场", "我们一起去商场", pipeline_max_chars_prompt_extra=0
+    ) == ["concepts[0](zh.hsk1.want_noun).dialogues[0].prompt_zh"]
