@@ -2219,6 +2219,50 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 回退成本：低。S2 到来时把拒绝换成实现。
 - 影响范围：`pipeline/build_pack.py`。
 
+## D-097 只实现本地发布；配了对象存储端点就拒绝，而不是假装上传
+
+- 日期：2026-09-20
+- 背景：E7 要求「上传对象存储」。但 `OBJECT_STORAGE_ENDPOINT` 在现有所有配置里都是空的、
+  且必须保持可选（L-5 / D-002），而接真实 S3 需要引入厂商 SDK 与一层 provider 抽象，
+  M0 并没有把对象存储纳入范围。
+- 选择：实现一个 `LocalMediaStore`——写到目录，URL 用 `PUBLIC_MEDIA_BASE_URL` 拼。
+  **`OBJECT_STORAGE_ENDPOINT` 非空时直接抛错拒绝导入**，错误信息说清没实现。
+- 理由：三种做法里，「配了桶却偷偷写到本地磁盘」最糟——数据库会装满 404 的 URL，
+  而发现它的是学习者，不是这个函数。宁可在命令行上失败。
+- 回退成本：低。补一个 S3 实现，`get_media_store` 多一个分支。
+- 影响范围：`pipeline/storage.py`、`pipeline/import_pack.py`。
+
+## D-098 content pack 不可变：同一版本不覆盖，要改就发新版本
+
+- 日期：2026-09-20
+- 背景：重复导入同一个 pack 该怎么办，PRD 没写。
+- 选择：`content_packs` 已有 UNIQUE(language, level, version)；**发现同版本已存在就拒绝**，
+  无论 checksum 是否相同。想更新内容就换一个 version 字符串。
+- 理由：`attempts.lesson_item_id` 指向 `lesson_items`。覆盖导入意味着删掉再重建 lesson_items，
+  于是学习者已有的作答要么外键失败、要么指向别的内容。**那不是一次导入，那是一次迁移**，
+  需要单独设计和演练。拒绝是唯一不会悄悄弄坏历史数据的选择。
+- concept 是例外：按 slug **更新而非删除**（`concept_mastery` 挂在上面），所以掌握度跟着人走。
+- 回退成本：低。真要做替换时另写一个带迁移的命令。
+- 影响范围：`pipeline/import_pack.py`。
+
+## D-099 一个 concept 一课；课程与课时标题暂用中文句型，等高棉语文案
+
+- 日期：2026-09-20（由项目所有者拍板）
+- 背景：pack 只固化 concept，`courses` / `lessons` / `lesson_items` 怎么切没人定过。
+  这是入库后最难改的一件事——`lesson_progress` 与 `attempts` 一旦挂上去，重切就要迁移。
+- 选择：**一个 concept 一课**，顺序即 seed 的教学顺序（也就是大纲顺序）。
+  每课的 item 按 PRD 3.3 的运行顺序排：explain → drill×N → vocab×N → qa×N。
+  HSK1 因此是 48 课。
+- 备选与放弃原因：按附录 A 的章节合并成 10–12 课，单课时长更接近 PRD 的每日 10 分钟目标，
+  但一课多 concept 会让「完课」与 mastery 的关系需要额外定义，而那是另一处要拍板的地方。
+  项目所有者选了最保守的一一对应。
+- **用户可见文案的处理**：`courses.title_km` 用等级本身（"HSK1"），
+  `lessons.title_km` 用 concept 的中文句型（"我要 + [名词]"）。**没有编造高棉语**。
+  句型对中文学习者是有信息量的，等级名在证书上也是这么写的；
+  真正的高棉语标题属于文案交付物，和 i18n 占位符是同一批工作。
+- 回退成本：中。合并课程需要一次 `lessons` / `lesson_progress` 迁移——
+  所以建议等 M2 有真实完课率数据再决定要不要合并。
+- 影响范围：`pipeline/import_pack.py`。
 ## D-100 「这个部署不卖东西」是一种合法配置，但必须明说
 
 - 日期：2026-10-13（由项目所有者拍板）
@@ -2244,10 +2288,20 @@ PRD 未定义、由实施方自行决定的事项记录在此。
 - 影响范围：`core/config.py`、`core/errors.py`、`services/selfcheck.py`、
   `api/v1/payments.py`、`bot/handlers.py`、三个 locale。
 
-## D-101【提案，待批准】Telegram Stars 作为第一个真实支付通道
+## D-101 Telegram Stars 暂不做；M2 以免费档试运行
 
-- 日期：2026-10-13
-- 状态：**提案**。涉及 PRD 第 14 节的修订与毛利目标，按 CLAUDE.md 第 10.8 条不自行决定。
+- 日期：2026-10-13（提案与裁决同日）
+- 状态：**提案已提出，项目所有者裁决「先不做」。** 本条保留全文，
+  以免下一个人把同样的分析再做一遍——**要重新提起时，先读下面「要你权衡的代价」
+  与「一个真实的架构问题」两节，它们不会因为时间推移而失效。**
+- 裁决：M2 走 D-100 的免费档路线（`PAYMENTS_ENABLED=false`），
+  支付通道推迟到柬埔寨主体就位、ABA 商户资质下来之后再接。
+  Stars 作为备选留在案上，不排除。
+- **重新提起的触发条件**（任一）：
+  ① 免费档试运行证明了留存，需要开始验证付费意愿；
+  ② ABA 流程确认会拖过某个你不能接受的时间点；
+  ③ Telegram 调整费率或提现规则，使下面那笔毛利账改观。
+- 原提案全文如下。
 - 背景：ABA 需要柬埔寨主体（没有）；MoR 平台（Paddle / Lemon Squeezy / Polar / Dodo）
   对柬埔寨卖家的资格查不到可靠结论，需要逐家问。
   **Telegram Stars 是唯一能完全在线开通、不需要任何公司主体的通道**，
@@ -2293,11 +2347,13 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 
 **provider 抽象在这里兑现了：换一个完全不同形态的收单方，业务层一行不动。**
 
-### 批准后我会做什么
+### 如果将来批准，要做的三件事
 
-1. 把本条从「提案」改为「决策」，并在 PRD 第 14 节加一条修订说明
-2. 新增 BACKLOG 条目 D12（Stars adapter），走正常的 PR 流程
+1. 把裁决改回「采纳」，并在 PRD 第 14 节加一条修订说明
+2. 新增 BACKLOG 条目（Stars adapter），走正常的 PR 流程
 3. 实现 `services/payments/stars.py` + registry 一行 + 第三种 renewal_mode 的 migration
+
+**在那之前，PRD 第 14 节不动**——它现在仍然排除 Stars 订阅，而那与现状一致。
 
 ---
 
