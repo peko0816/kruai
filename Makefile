@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict seed seed-strict generate validate review build import wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate review build import wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -24,6 +24,8 @@ help:
 	@echo "  make jobs       run the scheduled jobs once (renewals, reminders, reconciliation)"
 	@echo "  make i18n       report how many translations are still placeholders"
 	@echo "  make i18n-strict  fail while any translation is missing (the launch gate)"
+	@echo "  make i18n-export  write the sheet a translator fills in (LOCALE=km)"
+	@echo "  make i18n-apply   merge a filled sheet back (FILE=<path> LOCALE=km)"
 	@echo "  make seed       validate the content seed files"
 	@echo "  make seed-strict  also fail while a Khmer explanation is a placeholder (M1 gate)"
 	@echo "  make generate   draft the content for every seeded concept (LLM; fake by default)"
@@ -96,6 +98,17 @@ i18n:
 # The launch gate itself. docs/DEFINITION_OF_DONE.md runs this before M2.
 i18n-strict:
 	$(ROOT_RUN) -m bot.i18n_check --strict
+
+# Hands the untranslated strings to a translator as a spreadsheet, and takes
+# them back. `apply` refuses a translation that drops a {parameter} or that is
+# not written in the target script (D-102).
+LOCALE ?= km
+
+i18n-export:
+	$(ROOT_RUN) -m bot.i18n_handoff export --locale $(LOCALE)
+
+i18n-apply:
+	$(ROOT_RUN) -m bot.i18n_handoff apply $(FILE) --locale $(LOCALE)
 
 # Validates pipeline/seed/ (BACKLOG E1). The structural half also runs inside
 # `make check`, so a malformed seed fails a pull request; this prints the

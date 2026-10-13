@@ -39,3 +39,6 @@ pipeline/packs/*.csv
 # Synthesised audio: regenerable from the draft, and a level is thousands of
 # files. import_pack.py is what puts them in object storage.
 pipeline/packs/*-media/
+# Translator hand-off sheets: they go out and come back filled in; the filled
+# copy is merged with `make i18n-apply`, and the catalogue is what git keeps.
+locales/*.todo.csv
