@@ -53,13 +53,21 @@ def test_fake_is_registered() -> None:
 
 
 def test_unknown_provider_names_the_typo_and_the_alternatives() -> None:
-    with pytest.raises(ValueError, match="unknown llm provider 'openai'"):
-        get_llm(settings=settings(LLM_PROVIDER="openai"))
+    with pytest.raises(ValueError, match="unknown llm provider 'anthropic'"):
+        get_llm(settings=settings(LLM_PROVIDER="anthropic"))
 
 
 def test_error_message_lists_what_is_implemented() -> None:
-    with pytest.raises(ValueError, match=r"implemented: \['fake'\]"):
-        build_llm("nope")
+    with pytest.raises(ValueError, match=r"implemented: \['fake', 'openai'\]"):
+        build_llm("nope", settings=settings())
+
+
+def test_the_real_provider_is_built_when_it_is_asked_for() -> None:
+    """It is not the default and never will be by accident: LLM_PROVIDER picks
+    it, and pipeline/generate.py still refuses to spend without --confirm-spend."""
+    provider = get_llm(settings=settings(LLM_PROVIDER="openai"))
+
+    assert provider.name == "openai"
 
 
 def test_each_call_gets_its_own_instance() -> None:
