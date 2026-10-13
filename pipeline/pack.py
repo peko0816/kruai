@@ -133,6 +133,12 @@ class PackUsage(BaseModel):
     #: Copied from the draft that was built.
     llm_calls: int = 0
     llm_cost_usd_cents: int = 0
+    #: Which provider made those calls. Required, and separate from
+    #: ``Pack.provider``, which is the TTS one: carrying only the figure let
+    #: import_pack label 48 billed OpenAI calls ``llm:fake``, and a row that
+    #: names the wrong vendor is worse than a missing one — ``fake`` costs
+    #: nothing by definition, so the cost dashboard reads it as free for ever.
+    llm_provider: str = Field(min_length=1)
 
 
 class Pack(BaseModel):
