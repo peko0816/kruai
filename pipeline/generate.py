@@ -349,6 +349,7 @@ async def generate(
             ],
             purpose=Purpose.OFFLINE_GENERATION,
             json_schema=response_schema(task_types=task_types, **counts),
+            max_output_tokens=settings.pipeline_max_output_tokens,
         )
         every_result.extend(results)
 

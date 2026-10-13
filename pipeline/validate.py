@@ -24,9 +24,10 @@ run's output depend on this one's.
 from __future__ import annotations
 
 import argparse
+import itertools
 import re
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -42,6 +43,7 @@ from pipeline.wordlist import (
     detone,
     load_wordlist,
     split_syllables,
+    syllable_agrees,
     uncovered,
 )
 
@@ -124,61 +126,91 @@ def check_wordlist(sentence: str, wordlist: Wordlist, *, where: str) -> list[Vio
 def check_pinyin(characters: str, written: str, *, where: str) -> list[Violation]:
     """Rule 3. Regenerate with pypinyin and compare, syllable by syllable.
 
-    Heteronyms are accepted rather than fought: 了 is le and liǎo, 不 changes
-    tone before a fourth tone, and a reading that is right in context would
-    otherwise be reported as an error on every sentence that used it. So each
-    position is compared against *every* reading pypinyin knows for that
-    character, and only a syllable that matches none of them is a violation.
-    That still catches what the rule is for — a model writing pinyin that does
-    not belong to the characters it wrote.
+    Three conventions all have to be accepted, because all three are how
+    pinyin is actually written and a model writes it correctly:
 
-    The syllables are found by cutting the written pinyin against the
-    characters' own readings, not by splitting on spaces. Pinyin is written
-    word by word — 书包 is ``shūbāo``, not ``shū bāo`` (GB/T 16159) — so a
-    space is a word boundary, not a syllable boundary. Counting spaces made
-    this rule reject every correctly written sentence a model produced, while
-    the hand-written seed, which spaced every syllable, passed.
+    * **Words are joined.** 书包 is ``shūbāo``, not ``shū bāo`` (GB/T 16159),
+      so a space is a word boundary and counting spaces is not counting
+      syllables. The syllables are found by cutting against the characters'
+      own readings instead.
+    * **Neutral tone carries no mark, and 不 and 一 carry their sandhi tone.**
+      东西 is ``dōngxi``; 一下 is ``yíxià``. That judgement is
+      ``wordlist.syllable_agrees``, shared with the transcription checker
+      rather than written twice.
+    * **Erhua is an r on the syllable before it.** 哪儿 is ``nǎr``: 儿 has no
+      syllable of its own.
+
+    Heteronyms are accepted rather than fought: each position is compared
+    against *every* reading pypinyin knows for that character. That still
+    catches what the rule is for — pinyin that does not belong to the
+    characters it was written for.
     """
     han = "".join(_HAN.findall(characters))
-    expected = pinyin(han, style=Style.TONE, heteronym=True, errors="ignore")
     joined = _PINYIN_NOISE.sub("", written.strip().lower())
-    actual = split_syllables(han, joined)
 
-    if actual is None:
-        # No cut lines up, so there is no syllable list to compare tone against.
-        # Walking as far as a cut does go names the character that broke it,
-        # which is the difference between an error someone can act on and one
-        # that only says the sentence is wrong somewhere.
-        stuck = _stuck_at(han, joined, expected)
-        if stuck is not None:
-            index, rest = stuck
-            return [
-                Violation(
-                    "pinyin",
-                    where,
-                    f"syllable {index + 1} is {rest!r}; {han[index]!r} reads "
-                    f"{sorted(expected[index])}",
-                )
-            ]
+    for candidate, text in _readings_candidates(han, joined):
+        syllables = split_syllables(candidate, text)
+        if syllables is None:
+            continue
+        expected = pinyin(candidate, style=Style.TONE, heteronym=True, errors="ignore")
+        for index, (readings, syllable) in enumerate(zip(expected, syllables, strict=True)):
+            if not syllable_agrees(syllable, readings, character=candidate[index]):
+                return [
+                    Violation(
+                        "pinyin",
+                        where,
+                        f"syllable {index + 1} is {syllable!r}; {candidate[index]!r} "
+                        f"reads {sorted(readings)}",
+                    )
+                ]
+        return []
+
+    expected = pinyin(han, style=Style.TONE, heteronym=True, errors="ignore")
+    stuck = _stuck_at(han, joined, expected)
+    if stuck is not None:
+        index, rest = stuck
         return [
             Violation(
                 "pinyin",
                 where,
-                f"does not read as {len(expected)} syllable(s): {written!r} against {characters!r}",
+                f"syllable {index + 1} is {rest!r}; {han[index]!r} reads {sorted(expected[index])}",
             )
         ]
+    return [
+        Violation(
+            "pinyin",
+            where,
+            f"does not read as {len(expected)} syllable(s): {written!r} against {characters!r}",
+        )
+    ]
 
-    for index, (readings, syllable) in enumerate(zip(expected, actual, strict=True)):
-        if syllable not in {reading.lower() for reading in readings}:
-            return [
-                Violation(
-                    "pinyin",
-                    where,
-                    f"syllable {index + 1} is {syllable!r}; {han[index]!r} reads "
-                    f"{sorted(readings)}",
-                )
-            ]
-    return []
+
+#: A 儿 that follows another character, which is the erhua one. A leading 儿
+#: (儿子 érzi) is an ordinary syllable.
+_ERHUA_SUFFIX: Final = re.compile(r"(?<=.)儿")
+
+
+def _readings_candidates(han: str, joined: str) -> Iterator[tuple[str, str]]:
+    """The spellings this text could legitimately be, most literal first.
+
+    Erhua is the only one that changes how many syllables there are, and it is
+    resolved by trying: if dropping a 儿 and one ``r`` makes the whole string
+    cut cleanly, that was the ``r`` the 儿 was written as. Guessing which ``r``
+    by position would have to tell erhua from an r-initial syllable (日 rì),
+    which the spelling does not say.
+    """
+    yield han, joined
+
+    count = len(_ERHUA_SUFFIX.findall(han))
+    if not count or count > 2:  # two is already more erhua than a beginner sentence has
+        return
+    reduced = _ERHUA_SUFFIX.sub("", han)
+    positions = [index for index, letter in enumerate(joined) if letter == "r"]
+    for combination in itertools.combinations(positions, count):
+        yield (
+            reduced,
+            "".join(letter for index, letter in enumerate(joined) if index not in combination),
+        )
 
 
 def _stuck_at(han: str, joined: str, expected: Sequence[Sequence[str]]) -> tuple[int, str] | None:

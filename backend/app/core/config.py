@@ -283,6 +283,11 @@ class Settings(BaseSettings):
     pipeline_min_substitutions_per_concept: int = Field(default=12, ge=0)
     pipeline_min_dialogues_per_concept: int = Field(default=3, ge=0)
     pipeline_dedup_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
+    #: How much output one concept may need. The interface's own default is
+    #: 2048, which drafted 46 of HSK1's 48 concepts and truncated 比 and 了2
+    #: mid-answer — a limit is a limit whether or not anyone chose it (R3), and
+    #: a truncated answer costs the same as a whole one.
+    pipeline_max_output_tokens: int = Field(default=4096, gt=0)
     pipeline_max_chars_hsk1: int = Field(default=8, gt=0)
     pipeline_max_chars_hsk2: int = Field(default=12, gt=0)
     pipeline_max_chars_hsk3: int = Field(default=18, gt=0)

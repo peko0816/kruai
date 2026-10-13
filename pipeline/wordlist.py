@@ -370,14 +370,28 @@ def _tones_agree(word: str, syllables: Sequence[str]) -> bool:
     for index, syllable in enumerate(syllables):
         if index >= len(readings):
             return False
-        if syllable in {_plain(reading) for reading in readings[index]}:
-            continue
-        if syllable == detone(syllable):
-            continue
-        if index < len(characters) and characters[index] in _SANDHI:
-            continue
-        return False
+        character = characters[index] if index < len(characters) else ""
+        if not syllable_agrees(syllable, readings[index], character=character):
+            return False
     return True
+
+
+def syllable_agrees(syllable: str, readings: Sequence[str], *, character: str = "") -> bool:
+    """Is ``syllable`` a tone this character can be written with?
+
+    The two allowances are the whole subtlety of comparing pinyin, so they live
+    in one place: validate.py's rule 3 needs the same judgement, and a second
+    copy of them is a second thing to get wrong.
+
+    Written with no tone mark at all is neutral tone — 东西 is dōngxi, not
+    dōngxī — and 不 and 一 are written with their sandhi tone (bú dà, yìxiē).
+    Allowing any other difference would make the check blind to tone.
+    """
+    if syllable in {_plain(reading) for reading in readings}:
+        return True
+    if syllable == detone(syllable):
+        return True
+    return character in _SANDHI
 
 
 def _is_han(character: str) -> bool:
