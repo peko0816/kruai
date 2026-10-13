@@ -26,6 +26,7 @@ from pipeline.validate import (
     check_pinyin,
     check_sources,
     check_wordlist,
+    fix_rows,
     main,
     max_characters,
     validate,
@@ -631,3 +632,74 @@ def test_the_old_behaviour_is_one_setting_away() -> None:
     assert length_problems(
         "请说：我们一起去商场", "我们一起去商场", pipeline_max_chars_prompt_extra=0
     ) == ["concepts[0](zh.hsk1.want_noun).dialogues[0].prompt_zh"]
+
+
+# -------------------------------------------- handing the violations to a person
+#
+# report() prints for whoever ran the command. Working through a level's worth
+# of them is a different job, done over days, and a path to look up is not the
+# same as the sentence beside the complaint.
+
+
+def test_a_row_carries_the_text_the_violation_is_about() -> None:
+    draft = a_draft(
+        concepts=[
+            a_concept(
+                target_sentences=[{"zh": "我要咖啡。", "pinyin": "wǒ yào kā fēi", "km_gloss": KM}]
+            ).model_dump()
+        ]
+    )
+    problems = [
+        Violation("wordlist", "concepts[0](zh.hsk1.want_noun).target_sentences[0]", "outside")
+    ]
+
+    row = fix_rows(problems, draft=draft)[0]
+
+    assert row["chinese"] == "我要咖啡。"
+    assert row["pinyin"] == "wǒ yào kā fēi"
+    assert row["concept"] == "zh.hsk1.want_noun"
+    assert row["fix"] == ""
+
+
+def test_a_dialogue_field_resolves_to_that_field() -> None:
+    """prompt_zh and sample_answer_zh live on the same dialogue; a row that
+    showed the wrong one would be worked on in the wrong place."""
+    draft = a_draft()
+    at = "concepts[0](zh.hsk1.want_noun).dialogues[0]"
+
+    rows = fix_rows(
+        [
+            Violation("length", f"{at}.prompt_zh", "too long"),
+            Violation("length", f"{at}.sample_answer_zh", "too long"),
+        ],
+        draft=draft,
+    )
+
+    assert [row["chinese"] for row in rows] == ["你要水", "我要水"]
+
+
+def test_rows_are_ordered_by_grammar_point() -> None:
+    """Somebody works through these over days, and staying inside one point at
+    a time is the difference between a morning's work and forty context switches."""
+    draft = a_draft(
+        concepts=[
+            a_concept(slug="b", standard_ref="一09").model_dump(),
+            a_concept(slug="a", standard_ref="一02").model_dump(),
+        ]
+    )
+    rows = fix_rows(
+        [
+            Violation("wordlist", "concepts[0](b).target_sentences[0]", "x"),
+            Violation("wordlist", "concepts[1](a).target_sentences[0]", "x"),
+        ],
+        draft=draft,
+    )
+
+    assert [row["standard_ref"] for row in rows] == ["一02", "一09"]
+
+
+def test_a_draft_level_violation_does_not_claim_a_concept() -> None:
+    rows = fix_rows([Violation("sources", "draft", "no sources")], draft=a_draft())
+
+    assert rows[0]["concept"] == ""
+    assert rows[0]["chinese"] == ""

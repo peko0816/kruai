@@ -24,6 +24,7 @@ run's output depend on this one's.
 from __future__ import annotations
 
 import argparse
+import csv
 import itertools
 import re
 import sys
@@ -53,6 +54,11 @@ _KHMER: Final = re.compile(r"[\u1780-\u17ff]")
 #: Han characters. What the length rule counts, and what a Khmer field must not
 #: be written in.
 _HAN: Final = re.compile(r"[\u4e00-\u9fff]")
+
+#: Same as the other two exports: Excel reads a UTF-8 file without a byte-order
+#: mark as the local code page, which turns every Chinese column into mojibake
+#: (D-093).
+ENCODING: Final = "utf-8-sig"
 
 #: A translation nobody has written yet. Allowed in a seed (D-079), never in a
 #: draft: this is the stage that would let one through to a learner.
@@ -441,9 +447,112 @@ def report(problems: list[Violation], *, draft: Draft) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Handing the violations to a person
+#
+# report() prints for whoever ran the command. A level's worth of violations is
+# a different job: somebody works through them one at a time, over days, and
+# needs the offending text beside the complaint rather than a path to look up.
+# Note who this is for — these are Chinese-side problems (vocabulary above the
+# level, duplicates, length), not the Khmer judgement review_export.py samples.
+
+FIX_COLUMNS: Final[tuple[str, ...]] = (
+    "id",
+    "concept",
+    "standard_ref",
+    "pattern",
+    "rule",
+    "field",
+    "chinese",
+    "pinyin",
+    "problem",
+    "fix",
+)
+
+#: ``concepts[7](slug).target_sentences[3]`` and ``....dialogues[1].prompt_zh``.
+_WHERE: Final = re.compile(
+    r"concepts\[(?P<concept>\d+)\]\([^)]*\)"
+    r"(?:\.(?P<kind>\w+)(?:\[(?P<item>\d+)\])?(?:\.(?P<field>\w+))?)?"
+)
+
+
+def _text_at(draft: Draft, where: str) -> tuple[str, str]:
+    """The Chinese and pinyin the violation is about, or blanks.
+
+    Resolved from the draft rather than scraped out of the message: a message
+    is written for a reader, and a spreadsheet column is not.
+    """
+    found = _WHERE.match(where)
+    if found is None:
+        return "", ""
+    concept = draft.concepts[int(found["concept"])]
+    kind, item, field = found["kind"], found["item"], found["field"]
+    if kind == "km_explanation":
+        return concept.km_explanation, ""
+    if item is None:
+        return "", ""
+    index = int(item)
+    if kind == "target_sentences":
+        sentence = concept.target_sentences[index]
+        return (sentence.km_gloss, "") if field == "km_gloss" else (sentence.zh, sentence.pinyin)
+    if kind == "substitutions":
+        substitution = concept.substitutions[index]
+        if field == "km_gloss":
+            return substitution.km_gloss, ""
+        return substitution.zh, substitution.pinyin
+    if kind == "dialogues":
+        dialogue = concept.dialogues[index]
+        return getattr(dialogue, field or "prompt_zh", ""), ""
+    return "", ""
+
+
+def fix_rows(problems: Sequence[Violation], *, draft: Draft) -> list[dict[str, str]]:
+    """One row per violation, ordered the way somebody would work through them:
+    by concept, so a person stays inside one grammar point at a time."""
+    by_slug = {concept.slug: concept for concept in draft.concepts}
+    rows: list[dict[str, str]] = []
+    for problem in problems:
+        found = _WHERE.match(problem.where)
+        slug = ""
+        if found is not None:
+            slug = draft.concepts[int(found["concept"])].slug
+        concept = by_slug.get(slug)
+        chinese, reading = _text_at(draft, problem.where)
+        rows.append(
+            {
+                "id": problem.where,
+                "concept": slug,
+                "standard_ref": (concept.standard_ref or "") if concept else "",
+                "pattern": concept.pattern if concept else "",
+                "rule": problem.rule,
+                "field": problem.where.partition(")")[2].lstrip("."),
+                "chinese": chinese,
+                "pinyin": reading,
+                "problem": problem.message,
+                "fix": "",
+            }
+        )
+    rows.sort(key=lambda row: (row["standard_ref"], row["concept"], row["id"]))
+    return rows
+
+
+def write_fix_csv(rows: Sequence[dict[str, str]], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding=ENCODING, newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIX_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("draft", type=Path, help="the draft JSON written by generate.py")
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="also write the violations as a sheet somebody can work through",
+    )
     arguments = parser.parse_args(argv)
 
     settings = get_settings()
@@ -459,7 +568,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    return report(validate(draft, settings=settings, wordlist=wordlist), draft=draft)
+    problems = validate(draft, settings=settings, wordlist=wordlist)
+    if arguments.csv is not None:
+        write_fix_csv(fix_rows(problems, draft=draft), arguments.csv)
+        print(f"{arguments.csv}: {len(problems)} violation(s) to work through")
+    return report(problems, draft=draft)
 
 
 if __name__ == "__main__":
