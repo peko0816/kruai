@@ -136,7 +136,13 @@ def a_pack(tmp_path: Path, *, concepts: int = 2, **overrides: Any) -> tuple[Pack
         built_at=dt.datetime(2026, 9, 20, tzinfo=dt.UTC),
         provider="fake",
         validated=True,
-        usage=PackUsage(tts_calls=8, tts_cost_usd_cents=0, llm_calls=2, llm_cost_usd_cents=3),
+        usage=PackUsage(
+            tts_calls=8,
+            tts_cost_usd_cents=0,
+            llm_calls=2,
+            llm_cost_usd_cents=3,
+            llm_provider="fake",
+        ),
         concepts=tuple(built),
         media=tuple(assets),
         **overrides,
@@ -421,3 +427,31 @@ def test_the_runner_wraps_one_transaction(
 
     assert report.lessons == 1
     assert len(rows("SELECT id FROM content_packs")) == 1
+
+
+def test_each_stage_is_billed_to_the_provider_that_ran_it(db: sa.Engine, tmp_path: Path) -> None:
+    """Generation and synthesis routinely run on different vendors — a pack
+    drafted by a billed LLM while the TTS choice is still open (M0-2) is the
+    normal case, not an edge one.
+
+    Labelling both rows with the pack's TTS provider put 48 billed OpenAI calls
+    in the ledger as `llm:fake`, and `fake` costs nothing by definition, so the
+    cost dashboard read them as free. A row naming the wrong vendor is worse
+    than a missing one: the missing one still looks missing.
+    """
+    pack, media_dir = a_pack(tmp_path)
+    pack = pack.model_copy(
+        update={
+            "provider": "fake",
+            "usage": pack.usage.model_copy(update={"llm_provider": "openai"}),
+        }
+    ).sealed()
+
+    do_import(db, pack, media_dir, tmp_path)
+
+    with Session(db) as session:
+        ledger = session.execute(
+            sa.text("SELECT provider, quantity FROM cost_ledger ORDER BY provider")
+        ).all()
+
+    assert {provider for provider, _ in ledger} == {"llm:openai", "tts:fake"}

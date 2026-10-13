@@ -208,6 +208,7 @@ async def build(
             # import_pack.py is where both stages reach cost_ledger (D-084).
             llm_calls=draft.usage.calls,
             llm_cost_usd_cents=draft.usage.cost_usd_cents,
+            llm_provider=draft.provider,
         ),
         concepts=tuple(concepts),
         media=synth.assets,

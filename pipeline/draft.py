@@ -14,9 +14,10 @@ them would mean a regeneration rewrites hand-typed work.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Final
+import re
+from typing import Annotated, Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from pipeline.seed_schema import HskkTaskType
 
@@ -24,19 +25,49 @@ from pipeline.seed_schema import HskkTaskType
 #: refuse a draft it does not understand instead of half-reading it.
 DRAFT_VERSION: Final = 1
 
+#: C0 controls and DEL, less the three that are ordinary text. A model that
+#: loses its footing mid-answer emits these, and nothing downstream wants them:
+#: PostgreSQL refuses NUL in a text column outright, and the rest reach a
+#: learner's screen as nothing at all.
+_CONTROL: Final = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _no_control_characters(value: str) -> str:
+    """Refuse text a model garbled, at the point the draft is assembled.
+
+    This is not a ninth rule for validate.py: a field holding a NUL byte is
+    malformed rather than non-compliant, and the difference matters for where
+    it is caught. Refused here, generate.py records the concept as a failure
+    and the existing retry and repair machinery asks again. Allowed through, it
+    survives validation, is paid for in TTS, and fails at the database — the
+    one place where the fix is most expensive and the error says least.
+    """
+    found = _CONTROL.search(value)
+    if found is not None:
+        raise ValueError(
+            f"contains the control character {hex(ord(found.group()))} at "
+            f"position {found.start()}; the model garbled this field"
+        )
+    return value
+
+
+#: Every text field a model writes. Non-empty, and free of what it emits when
+#: it loses its footing.
+Text = Annotated[str, Field(min_length=1), AfterValidator(_no_control_characters)]
+
 
 class TargetSentence(BaseModel):
     """One sentence a learner will be asked to say (PRD 3.3 step 2)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    zh: str = Field(min_length=1)
+    zh: Text
     #: Tone-marked pinyin, diacritics rather than digits: nǐ hǎo, not ni3 hao3.
     #: It is what a learner reads, and validate.py regenerates it with pypinyin
     #: and compares (PRD 6.2), so the two have to agree on a notation.
-    pinyin: str = Field(min_length=1)
+    pinyin: Text
     #: Khmer gloss. Drafted by the model, reviewed by a native speaker (D-081).
-    km_gloss: str = Field(min_length=1)
+    km_gloss: Text
 
 
 class Substitution(BaseModel):
@@ -44,9 +75,9 @@ class Substitution(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    zh: str = Field(min_length=1)
-    pinyin: str = Field(min_length=1)
-    km_gloss: str = Field(min_length=1)
+    zh: Text
+    pinyin: Text
+    km_gloss: Text
 
 
 class Dialogue(BaseModel):
@@ -56,12 +87,12 @@ class Dialogue(BaseModel):
 
     hskk_task_type: HskkTaskType
     #: What the learner hears or reads.
-    prompt_zh: str = Field(min_length=1)
+    prompt_zh: Text
     #: The same, in Khmer, so a beginner knows what is being asked.
-    prompt_km: str = Field(min_length=1)
+    prompt_km: Text
     #: A model answer. Not the only acceptable one — scoring is by
     #: pronunciation, not by string match — but drills need something to show.
-    sample_answer_zh: str = Field(min_length=1)
+    sample_answer_zh: Text
 
 
 class ConceptDraft(BaseModel):
@@ -75,7 +106,7 @@ class ConceptDraft(BaseModel):
     hskk_task_types: tuple[HskkTaskType, ...] = Field(min_length=1)
     #: Khmer, drafted. The seed carried a placeholder (D-079); this is the
     #: draft that replaces it and that a native speaker then reviews (D-081).
-    km_explanation: str = Field(min_length=1)
+    km_explanation: Text
     target_sentences: tuple[TargetSentence, ...] = Field(min_length=1)
     substitutions: tuple[Substitution, ...] = Field(min_length=1)
     dialogues: tuple[Dialogue, ...] = Field(min_length=1)

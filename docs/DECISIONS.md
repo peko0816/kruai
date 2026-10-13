@@ -2669,3 +2669,42 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   那时的方案应当是**一个显式的专有名词清单文件**，和词表并列、各有来源，
   而不是在规则里加 if——清单可以审查，if 不能。
 - 回退成本：低。现在没有新增任何机制。
+
+## D-115 控制字符在数据模型层拦，不做第 9 条规则
+
+- 日期：2026-10-13
+- 背景：HSK1 全量 draft 的 3 个 concept、11 个字段里混有 C0 控制字符
+  （`0x1f` 单元分隔符为主，一处含 `0x00`）。模型写高棉语时"失手"的产物。
+- **8 条校验规则没有一条拦得住**：`check_khmer` 查的是"是不是高棉文、是不是占位符"，
+  控制字符两样都不是。于是它通过了全部校验、付了 TTS 的钱、
+  最后死在 `INSERT` 上——**PostgreSQL 不接受 text 字段里的 NUL**。
+- 选择：在 `pipeline/draft.py` 的 10 个文本字段上加 `Text` 类型（非空 + 无控制字符），
+  **不新增第 9 条规则**。
+- 理由（位置比机制重要）：
+  - 带 NUL 的字段是**畸形**不是**不合规**。规则判的是内容好坏，模型判的是数据能不能用。
+  - 拦在模型层，`generate.py` 的 `_merge` 当场把该 concept 记成 failure，
+    **现有的重试与修复轮自动接手**。拦在 validate 层，要等到跑完校验才知道。
+  - 放过去的代价最高：它在最贵的地方（已付 TTS）、以最难读的方式（SQL 报错）暴露。
+- 放行 `\t \n \r`：跨行的解释是解释，不是乱码。
+- 回退成本：低。
+- 影响范围：`pipeline/draft.py`、`pipeline/tests/test_draft.py`（新增）。
+
+## D-116 两条成本账各自标注跑它的那家 provider
+
+- 日期：2026-10-13
+- 背景：HSK1 入库后 `cost_ledger` 写的是 `llm:fake` —— 而那 48 次调用是 **openai** 的。
+- 原因：`Pack.provider` 存的是 **TTS** 的 provider（给 `media_assets.provider` 追溯用），
+  而 `_record_cost` 拿同一个值去标 llm 与 tts 两行。
+  `PackUsage` 按 D-084 carry 了 LLM 的**数字**，却没 carry LLM 的**厂商名**。
+- **错误归属比缺失更糟**：`fake` 按定义不花钱，这行账在成本看板上**永远读作零支出**。
+  而缺失的那行至少看起来是缺的。CLAUDE.md 第 8 节管的是前者。
+- 选择：`PackUsage.llm_provider` 设为**必填**（`min_length=1`），由 `build_pack` 从
+  draft 抄入；`_record_cost` 两行各用各的。
+- **为什么必填而不是给默认值**：默认值会让旧 pack 静默地继续标错。
+  pack 是可重新生成的产物（`make build` 几秒），让它加载失败并点名缺哪个字段，
+  比猜一个厂商名诚实——与 `wordlist` 缺失即拒绝是同一个立场。
+- **这两家不同是常态不是边缘情况**：M0-2 未决期间，用计费 LLM 生成 + FakeTTS 配音
+  正是当前的标准做法。
+- 回退成本：低。
+- 影响范围：`pipeline/pack.py`、`pipeline/build_pack.py`、`pipeline/import_pack.py`、
+  `backend/tests/integration/test_import_pack.py`。
