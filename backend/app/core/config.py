@@ -138,6 +138,30 @@ class Settings(BaseSettings):
     scoring_fallback_providers: Annotated[tuple[str, ...], NoDecode] = ()
     tts_provider: str = "fake"
     llm_provider: str = "fake"
+    #: The model a real LLM provider asks for. PRD section 8 fixes the tier
+    #: ("gpt-4.1-mini class"), not the name, because the names change faster
+    #: than the tier does.
+    llm_model: str = "gpt-4.1-mini"
+    #: Any OpenAI-compatible endpoint. The reason the adapter speaks HTTP
+    #: rather than an SDK: moving to another vendor's compatible API is this
+    #: line, not a rewrite.
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_timeout_seconds: float = Field(default=60.0, gt=0.0)
+    llm_max_retries: int = Field(default=2, ge=0)
+    llm_retry_base_seconds: float = Field(default=1.0, gt=0.0)
+    #: [$] How many billed calls may be in flight. Deliberately low: this is
+    #: the knob that turns "a run cost twenty cents" into "a run cost twenty
+    #: cents and tripped a rate limit", and CLAUDE.md section 6 makes the
+    #: concurrency ceiling of a paid API something the owner sets rather than
+    #: something a default decides (D-103).
+    llm_max_concurrency: int = Field(default=4, gt=0)
+    #: [$] USD per million tokens, for the cost_ledger estimate. Not a price
+    #: list anybody is billed from — the vendor bills — but the figure the
+    #: content-production cost is recorded with, so it has to be editable
+    #: without a release when the tier's price moves.
+    llm_price_input_usd_per_million: float = Field(default=0.40, ge=0.0)
+    llm_price_cached_input_usd_per_million: float = Field(default=0.10, ge=0.0)
+    llm_price_output_usd_per_million: float = Field(default=1.60, ge=0.0)
     payment_providers: Annotated[tuple[str, ...], NoDecode] = ("fake",)
     #: Whether this deployment sells anything at all. False is a legitimate
     #: configuration — a pilot can run the free tier while the merchant

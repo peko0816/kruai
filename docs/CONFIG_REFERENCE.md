@@ -46,7 +46,16 @@
 | `SCORING_PROVIDER` | `fake` | `fake` / `azure` / `iflytek` |
 | `SCORING_FALLBACK_PROVIDERS` | `` | 逗号分隔，按序回退 |
 | `TTS_PROVIDER` | `fake` | `fake` / `azure` / `google` / `elevenlabs` |
-| `LLM_PROVIDER` | `fake` | `fake` / `openai` / `anthropic` |
+| `LLM_PROVIDER` | `fake` | `fake` / `openai` |
+| `LLM_MODEL` | `gpt-4.1-mini` | 只在 provider 非 fake 时读。PRD 第 8 节定的是**档位**不是名字——名字变得比档位快 |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | 任何 OpenAI 兼容端点。适配器走 HTTP 而不是厂商 SDK，就是为了让换供应商是改这一行而不是重写 |
+| `LLM_TIMEOUT_SECONDS` | `60` | |
+| `LLM_MAX_RETRIES` | `2` | 只重试 429 与 5xx；400 重试一次还是 400，而第二次照样计费 |
+| `LLM_RETRY_BASE_SECONDS` | `1` | 指数退避基数 |
+| `LLM_MAX_CONCURRENCY` | `4` | `[$]` **同时在飞的计费调用数上限**。按 CLAUDE.md 第 6 节，付费 API 的并发上限由项目所有者定，不由默认值决定（D-103） |
+| `LLM_PRICE_INPUT_USD_PER_MILLION` | `0.40` | `[$]` 仅用于 `cost_ledger` 的成本估算，不是计费依据。档位价格变动时要能不发版就改 |
+| `LLM_PRICE_CACHED_INPUT_USD_PER_MILLION` | `0.10` | `[$]` 同上。命中 prompt cache 的输入按这个价算 |
+| `LLM_PRICE_OUTPUT_USD_PER_MILLION` | `1.60` | `[$]` 同上 |
 | `PAYMENT_PROVIDERS` | `fake` | 逗号分隔，可同时启用 `aba,bakong,stars` |
 | `PAYMENTS_ENABLED` | `true` | 这个部署卖不卖东西。`false` 是合法配置——商户资质还没下来时先跑免费档（D-100）——但那时 `PAYMENT_PROVIDERS` 必须为空，两者矛盾会在启动自检时失败。为 `false` 时 `/payments/checkout` 返回 503 `payment.unavailable` |
 | `REALTIME_PROVIDER` | `fake` | M3 启用 |
