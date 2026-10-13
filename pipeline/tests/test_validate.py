@@ -140,6 +140,41 @@ def test_the_syllable_dividing_apostrophe_is_not_a_syllable() -> None:
     assert check_pinyin("西安", "xī'ān", where="x") == []
 
 
+@pytest.mark.parametrize(
+    ("characters", "written"),
+    [
+        ("哪儿", "nǎr"),  # erhua: 儿 is an r on the syllable before it
+        ("这儿", "zhèr"),
+        ("一点儿", "yìdiǎnr"),  # erhua and 一's sandhi at once
+        ("儿子", "érzi"),  # a leading 儿 is an ordinary syllable, not erhua
+        ("东西", "dōngxi"),  # neutral tone carries no mark
+        ("喜欢", "xǐhuan"),
+        ("休息", "xiūxi"),
+        ("一下", "yíxià"),  # 一 written with its sandhi tone
+        ("不是", "búshì"),  # 不 likewise
+    ],
+)
+def test_the_conventions_pinyin_is_actually_written_with_pass(
+    characters: str, written: str
+) -> None:
+    """All three cost the first full run false violations: 87 of them, on
+    content that was correctly written."""
+    assert check_pinyin(characters, written, where="x") == []
+
+
+@pytest.mark.parametrize(
+    ("characters", "written"),
+    [
+        ("哪儿", "nǎlǐ"),  # a different word, not a spelling of this one
+        ("东西", "dōngchá"),  # neutral tone must not excuse a wrong syllable
+        ("书包", "shūbiāo"),  # nor must joining hide one
+    ],
+)
+def test_the_rule_is_not_blind_after_accepting_them(characters: str, written: str) -> None:
+    """Each allowance is a hole if it accepts more than the convention it is for."""
+    assert rules(check_pinyin(characters, written, where="x")) == ["pinyin"]
+
+
 def test_pinyin_that_does_not_match_is_refused() -> None:
     problems = check_pinyin("我要水", "wǒ yào chá", where="x")
 

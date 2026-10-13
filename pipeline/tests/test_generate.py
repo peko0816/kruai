@@ -602,3 +602,19 @@ def test_the_character_limit_is_not_written_into_the_prompt_file() -> None:
     )
 
     assert "18 Chinese characters" in user
+
+
+def test_the_output_limit_travels_from_configuration() -> None:
+    """R3. The interface's own default is 2048, which truncated 比 and 了2
+    mid-answer on the first full run — and a truncated answer is billed like a
+    whole one."""
+    seen: list[int] = []
+
+    class Recording(FakeLLM):
+        async def batch_complete(self, batches: Any, **kwargs: Any) -> list[CompletionResult]:
+            seen.append(kwargs["max_output_tokens"])
+            return await super().batch_complete(batches, **kwargs)
+
+    asyncio.run(run(a_seed(), Recording(), settings=settings(pipeline_max_output_tokens=9001)))
+
+    assert seen == [9001]
