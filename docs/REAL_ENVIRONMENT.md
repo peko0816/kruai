@@ -137,7 +137,9 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 |---|---|
 | **要办什么** | `OPENAI_API_KEY`（或等价的 Anthropic key，provider 抽象里换一个实现即可） |
 | **成本** | 见上表，一次全量 ≈ $0.2–1.3。**不需要为这个金额设审批** |
-| **流程** | 我把真实 provider 的实现补上 → `make generate --confirm-spend` → `make validate` → 修回流 → `make review` 导出给母语者 |
+| **流程** | ~~我把真实 provider 的实现补上~~ **已完成（D-103）** → 你给 key → `LLM_PROVIDER=openai` → `make generate --confirm-spend` → `make validate` → 修回流 → `make review` 导出给母语者 |
+| **还要你确认一个数** | `LLM_MAX_CONCURRENCY` 默认 4（同时在飞的计费调用数）。按 CLAUDE.md 第 6 节这个数由你定，不由默认值决定 |
+| **未验证的部分** | 适配器的全部测试都对着脚本化的 HTTP 跑——证明了我们这一侧，没证明厂商那一侧。**第一次真实调用要有人盯着** |
 | **验收** | 八条规则全过（或只剩少量需人工改写的条目） |
 | **已就位** | 成本会自动记入 `cost_ledger`，`ref='content_production'`，不混进每用户运营成本 |
 

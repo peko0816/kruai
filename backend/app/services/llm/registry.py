@@ -16,10 +16,14 @@ from collections.abc import Callable
 from app.core.config import Settings
 from app.services.llm.base import LLMProvider
 from app.services.llm.fake import FakeLLM
+from app.services.llm.openai import OpenAILLM
 from app.services.provider_errors import ProviderConfigurationError
 
-_FACTORIES: dict[str, Callable[[], LLMProvider]] = {
-    "fake": FakeLLM,
+#: A factory per implementation. The real one takes settings, the fake does
+#: not, so every factory is given them and ignores what it does not need.
+_FACTORIES: dict[str, Callable[[Settings], LLMProvider]] = {
+    "fake": lambda _settings: FakeLLM(),
+    "openai": OpenAILLM,
 }
 
 
@@ -27,7 +31,7 @@ def available_providers() -> tuple[str, ...]:
     return tuple(sorted(_FACTORIES))
 
 
-def build_llm(name: str) -> LLMProvider:
+def build_llm(name: str, *, settings: Settings) -> LLMProvider:
     """Instantiate one provider by name.
 
     Raises:
@@ -39,7 +43,7 @@ def build_llm(name: str) -> LLMProvider:
         raise ProviderConfigurationError(
             f"unknown llm provider {name!r}; implemented: {list(available_providers())}"
         )
-    return factory()
+    return factory(settings)
 
 
 def get_llm(*, settings: Settings) -> LLMProvider:
@@ -50,4 +54,4 @@ def get_llm(*, settings: Settings) -> LLMProvider:
     prompt caching — and sharing that across unrelated callers would make cache
     hits depend on who ran first.
     """
-    return build_llm(settings.llm_provider)
+    return build_llm(settings.llm_provider, settings=settings)
