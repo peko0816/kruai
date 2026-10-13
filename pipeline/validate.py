@@ -36,7 +36,14 @@ from pypinyin import Style, pinyin
 from app.core.config import Settings, get_settings
 from pipeline.draft import ConceptDraft, Draft
 from pipeline.minhash import find_duplicates
-from pipeline.wordlist import MissingWordlistError, Wordlist, load_wordlist, uncovered
+from pipeline.wordlist import (
+    MissingWordlistError,
+    Wordlist,
+    detone,
+    load_wordlist,
+    split_syllables,
+    uncovered,
+)
 
 #: Khmer, U+1780-U+17FF (CODING_STANDARDS section 11).
 _KHMER: Final = re.compile(r"[\u1780-\u17ff]")
@@ -50,8 +57,9 @@ _HAN: Final = re.compile(r"[\u4e00-\u9fff]")
 _PLACEHOLDER: Final = re.compile(r"\[\[km:[^\]]*\]\]")
 
 #: Everything that is not a syllable when comparing pinyin: tone-neutral
-#: separators the standard uses (dì//diǎn), punctuation, and spacing.
-_PINYIN_NOISE: Final = re.compile(r"[\s/·,.!?;:()\u3000-\u303f\uff00-\uffef-]+")
+#: separators the standard uses (dì//diǎn), the syllable-dividing apostrophe
+#: (xī'ān), punctuation, and spacing.
+_PINYIN_NOISE: Final = re.compile(r"[\s/·'\u2019,.!?;:()\u3000-\u303f\uff00-\uffef-]+")
 
 
 @dataclass(frozen=True)
@@ -123,17 +131,40 @@ def check_pinyin(characters: str, written: str, *, where: str) -> list[Violation
     character, and only a syllable that matches none of them is a violation.
     That still catches what the rule is for — a model writing pinyin that does
     not belong to the characters it wrote.
-    """
-    expected = pinyin(characters, style=Style.TONE, heteronym=True, errors="ignore")
-    actual = [syllable for syllable in _PINYIN_NOISE.split(written.strip().lower()) if syllable]
 
-    if len(expected) != len(actual):
+    The syllables are found by cutting the written pinyin against the
+    characters' own readings, not by splitting on spaces. Pinyin is written
+    word by word — 书包 is ``shūbāo``, not ``shū bāo`` (GB/T 16159) — so a
+    space is a word boundary, not a syllable boundary. Counting spaces made
+    this rule reject every correctly written sentence a model produced, while
+    the hand-written seed, which spaced every syllable, passed.
+    """
+    han = "".join(_HAN.findall(characters))
+    expected = pinyin(han, style=Style.TONE, heteronym=True, errors="ignore")
+    joined = _PINYIN_NOISE.sub("", written.strip().lower())
+    actual = split_syllables(han, joined)
+
+    if actual is None:
+        # No cut lines up, so there is no syllable list to compare tone against.
+        # Walking as far as a cut does go names the character that broke it,
+        # which is the difference between an error someone can act on and one
+        # that only says the sentence is wrong somewhere.
+        stuck = _stuck_at(han, joined, expected)
+        if stuck is not None:
+            index, rest = stuck
+            return [
+                Violation(
+                    "pinyin",
+                    where,
+                    f"syllable {index + 1} is {rest!r}; {han[index]!r} reads "
+                    f"{sorted(expected[index])}",
+                )
+            ]
         return [
             Violation(
                 "pinyin",
                 where,
-                f"{len(actual)} syllables for {len(expected)} characters: "
-                f"{written!r} against {characters!r}",
+                f"does not read as {len(expected)} syllable(s): {written!r} against {characters!r}",
             )
         ]
 
@@ -143,11 +174,38 @@ def check_pinyin(characters: str, written: str, *, where: str) -> list[Violation
                 Violation(
                     "pinyin",
                     where,
-                    f"syllable {index + 1} is {syllable!r}; {characters[index]!r} reads "
+                    f"syllable {index + 1} is {syllable!r}; {han[index]!r} reads "
                     f"{sorted(readings)}",
                 )
             ]
     return []
+
+
+def _stuck_at(han: str, joined: str, expected: Sequence[Sequence[str]]) -> tuple[int, str] | None:
+    """Where a left-to-right read of ``joined`` stops matching ``han``.
+
+    Returns the character's index and what was left of the pinyin there, or
+    None when the whole string reads but the lengths still disagree — the
+    pinyin ran out early, or ran on past the end.
+    """
+    rest = joined
+    for index, readings in enumerate(expected):
+        for reading in readings:
+            bare = detone(reading.lower())
+            if bare and detone(rest).startswith(bare):
+                rest = rest[len(_prefix_of(rest, len(bare))) :]
+                break
+        else:
+            return index, rest
+    return None
+
+
+def _prefix_of(text: str, bare_length: int) -> str:
+    """The prefix of ``text`` that is ``bare_length`` long once tones are gone."""
+    for size in range(bare_length, len(text) + 1):
+        if len(detone(text[:size])) == bare_length:
+            return text[:size]
+    return text
 
 
 def check_khmer(text: str, *, where: str) -> list[Violation]:

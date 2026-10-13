@@ -22,7 +22,13 @@ from app.services.llm.base import CompletionResult, LLMProvider, Message
 from app.services.llm.fake import FakeLLM
 from pipeline import generate as generate_module
 from pipeline.draft import ConceptDraft, Draft
-from pipeline.generate import concept_messages, generate, main, response_schema
+from pipeline.generate import (
+    concept_messages,
+    generate,
+    main,
+    response_schema,
+    system_prompt,
+)
 from pipeline.seed_schema import SeedFile, load_seed_file, parse_seed
 from pipeline.validate_seed import SEED_ROOT
 
@@ -511,3 +517,88 @@ def test_the_counts_are_left_out_when_nobody_asks_for_them() -> None:
     said = " ".join(m.content for m in concept_messages(seed.concepts[0], seed=seed))
 
     assert "at least" not in said
+
+
+# ------------------------------------------------- what the prompt has to carry
+#
+# The first run against a real provider produced 31 violations on one concept.
+# Sixteen were validate.py's own bug; the rest were the prompt not saying what
+# it needed. These are that gap, held open.
+
+
+def test_the_level_vocabulary_reaches_the_model() -> None:
+    """Rule 1 said "at or below the stated level" and never said what that was.
+
+    The model guessed generously — 椅 猫 瓶 狗 室 桌 停 公园 箱 in HSK1
+    sentences — and every one was rejected downstream.
+    """
+    from pipeline.wordlist import load_wordlist
+
+    hsk1 = load_wordlist("zh", "HSK1")
+    prompt = system_prompt(hsk1)
+
+    assert "水" in prompt
+    assert "椅" not in prompt
+    assert prompt.rstrip().endswith("and nothing else.")
+
+
+def test_without_a_word_list_the_prompt_still_reads_as_instructions() -> None:
+    assert system_prompt(None).rstrip().endswith("and nothing else.")
+    assert "vocabulary of this level" not in system_prompt(None)
+
+
+def test_a_level_with_no_word_list_is_refused_before_any_money_is_spent() -> None:
+    """wordlist.py asks every caller not to read a missing list as "nothing to
+    check". Generating anyway bills for a draft rule 1 will reject."""
+    from pipeline.wordlist import MissingWordlistError
+
+    document: dict[str, Any] = {
+        "schema_version": 1,
+        "meta": {
+            "language": "zh",
+            "level": "HSK9",
+            "licence": "public standards",
+            "sources": [{"id": "zh.standard.2021"}],
+        },
+        "concepts": [
+            {
+                "slug": "zh.hsk9.whatever",
+                "standard_ref": "九01",
+                "pattern": "X + Y",
+                "km_explanation": "[[km:concept.zh.hsk9.whatever]]",
+                "hskk_task_types": ["listen_and_repeat"],
+                "sort_order": 10,
+            }
+        ],
+    }
+    seed = parse_seed(document, origin=Path("test.yaml"))
+
+    # Specifically the missing list, not merely "something raised": HSK9 has
+    # no configured character limit either, and a loose `raises` here passed
+    # even with the refusal deleted.
+    with pytest.raises(MissingWordlistError):
+        asyncio.run(run(seed, FakeLLM()))
+
+
+def test_the_character_limit_is_stated_and_covers_dialogue_prompts() -> None:
+    """The one string the first run broke it on was not a sentence: a dialogue
+    prompt whose instruction wording (an opening "please say after me") counts toward the limit."""
+    seed = a_seed()
+    messages = concept_messages(seed.concepts[0], seed=seed, max_chars=8)
+    user = next(m.content for m in messages if m.role == "user")
+
+    assert "8 Chinese characters" in user
+    assert "dialogue prompt" in user
+
+
+def test_the_character_limit_is_not_written_into_the_prompt_file() -> None:
+    """R3: the number travels from PIPELINE_MAX_CHARS_*, so a different limit
+    has to show up in the text."""
+    seed = a_seed()
+    user = next(
+        m.content
+        for m in concept_messages(seed.concepts[0], seed=seed, max_chars=18)
+        if m.role == "user"
+    )
+
+    assert "18 Chinese characters" in user

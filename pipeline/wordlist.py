@@ -279,7 +279,7 @@ def pinyin_agrees(word: str, reading: str) -> bool:
     stripped = _TRAILING_NOTE.sub("", stripped).replace("（", "").replace("）", "")
 
     for candidate in (target, target.removesuffix("r")):
-        syllables = _split_syllables(stripped, candidate)
+        syllables = split_syllables(stripped, candidate)
         if syllables is not None and _tones_agree(stripped, syllables):
             return True
     return False
@@ -292,7 +292,12 @@ def _plain(reading: str) -> str:
     return reading.lower()
 
 
-def _detone(syllables: str) -> str:
+def detone(syllables: str) -> str:
+    """The syllables with their tone marks removed.
+
+    Public alongside split_syllables: a caller that cuts pinyin also has to
+    compare it without tone.
+    """
     return "".join(
         character
         for character in unicodedata.normalize("NFD", syllables)
@@ -315,12 +320,16 @@ def _readings(word: str) -> list[list[str]]:
     return pinyin(word, style=Style.TONE, heteronym=True, errors="ignore")
 
 
-def _split_syllables(word: str, target: str) -> list[str] | None:
+def split_syllables(word: str, target: str) -> list[str] | None:
     """Cut ``target`` into one syllable per character, ignoring tone.
 
-    Returns the pieces of the table's own pinyin so the caller can judge their
+    Returns the pieces of the written pinyin so the caller can judge their
     tones separately; None when no cut lines up, which is what a misread
     character looks like.
+
+    Public because validate.py's rule 3 needs the same cut: pinyin is written
+    word by word (``shūbāo``), not character by character, so counting
+    whitespace is not counting syllables.
     """
     readings = _readings(word)
 
@@ -328,8 +337,8 @@ def _split_syllables(word: str, target: str) -> list[str] | None:
         if index == len(readings):
             return taken if rest == "" else None
         for reading in readings[index]:
-            bare = _detone(_plain(reading))
-            if not bare or not _detone(rest).startswith(bare):
+            bare = detone(_plain(reading))
+            if not bare or not detone(rest).startswith(bare):
                 continue
             piece = _take(rest, len(bare))
             found = walk(index + 1, rest[len(piece) :], [*taken, piece])
@@ -343,7 +352,7 @@ def _split_syllables(word: str, target: str) -> list[str] | None:
 def _take(text: str, bare_length: int) -> str:
     """The prefix of ``text`` that is ``bare_length`` long once tones are stripped."""
     for size in range(bare_length, len(text) + 1):
-        if len(_detone(text[:size])) == bare_length:
+        if len(detone(text[:size])) == bare_length:
             return text[:size]
     return text
 
@@ -363,7 +372,7 @@ def _tones_agree(word: str, syllables: Sequence[str]) -> bool:
             return False
         if syllable in {_plain(reading) for reading in readings[index]}:
             continue
-        if syllable == _detone(syllable):
+        if syllable == detone(syllable):
             continue
         if index < len(characters) and characters[index] in _SANDHI:
             continue
@@ -403,15 +412,15 @@ def sort_key(entry: SourceEntry) -> tuple[str, tuple[tuple[str, int], ...]] | No
     head = head.replace(_ERHUA, "").replace("（", "").replace("）", "")
     target = _plain(reading)
 
-    syllables = _split_syllables(head, target)
+    syllables = split_syllables(head, target)
     erhua = _ERHUA in entry.word
     if syllables is None:
-        syllables = _split_syllables(head, target.removesuffix("r"))
+        syllables = split_syllables(head, target.removesuffix("r"))
         erhua = erhua or syllables is not None
     if syllables is None:
         return None
 
-    key = [(_detone(syllable).lower(), _tone_of(syllable)) for syllable in syllables]
+    key = [(detone(syllable).lower(), _tone_of(syllable)) for syllable in syllables]
     if erhua:
         key.append(("r", 5))
     return head[:1], tuple(key)
