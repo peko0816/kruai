@@ -2397,6 +2397,9 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   CLAUDE.md 第 6 节把「付费 API 的并发上限」列为必须停下来问的四类之一，
   所以这个默认值**只是一个保守占位**，请你确认或改掉。
   （不影响安全：`pipeline/generate.py` 仍然要 `--confirm-spend` 才会花钱，CI 全程 fake。）
+  - **2026-10-13 已确认：维持 4。** 实测该账号对 `gpt-4.1-mini` 的限额是
+    5000 RPM / 2,000,000 TPM；全量生成是 48 个请求、约 14.4 万 token，
+    离任何一条上限都差两个数量级。原先担心的是 Free tier 的 10 RPM，前提不成立。
 - 成本记账：按 `LLM_PRICE_*` 三个配置项估算，**取整到分、向下取整**。
   单次调用因此通常记 0 分——这是对的：每次调用向上取整到 1 分，
   会让一个等级的成本被高估到超过它真实的总价。`cost_ledger` 求和才是有意义的数字。
@@ -2407,6 +2410,27 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。`LLM_PROVIDER=fake` 即可退回。
 - 影响范围：`services/llm/openai.py`、`services/llm/registry.py`、`core/config.py`、
   `.env.example`、`CONFIG_REFERENCE.md`。
+
+## D-104 数量要求同时写进 prompt 与 schema；schema 不是唯一的承载处
+
+- 日期：2026-10-13
+- 背景：要去申请真实 LLM key 了，而我们的生成 schema 用 `minItems` 表达
+  「至少 8 个目标句 / 12 个替换项 / 3 个对话」。查了一圈：
+  **strict 结构化输出只接受 JSON Schema 的一个子集，而这个子集的边界随时间变过**——
+  官方文档被截断取不全，社区说法前后矛盾（有人说 `minItems` 从不支持，
+  也有人说后来加上了）。
+- 这类事不该靠猜，也不该等第一次真实调用去撞：
+  撞上的症状是一个 400，而当时你正在怀疑是不是 key 配错了。
+- 选择：**把数量要求也写进 prompt 文本**，schema 里的 `minItems` 保留。
+  - 被接受 → 两处一致，没有损失
+  - 被拒绝（400）→ 删掉那几个关键字即可，prompt 仍然带着要求
+  - 被忽略 → prompt 仍然带着要求
+- **真正的强制在哪**：两处都不是。`validate.py` 的规则 5（concept 覆盖）才是，
+  它数的是实际产出。schema 和 prompt 都只是「告诉模型要什么」。
+  原先的写法让 `minItems` 看起来像强制，而它其实是个提示——
+  一个没人读的 schema 关键字，等于一条悄悄变成可选的要求。
+- 回退成本：低。
+- 影响范围：`pipeline/generate.py`。
 
 ---
 

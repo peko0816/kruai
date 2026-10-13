@@ -173,14 +173,36 @@ def response_schema(
     }
 
 
-def concept_messages(concept: SeedConcept, *, seed: SeedFile) -> list[Message]:
-    """The prompt for one concept. See the R7 block above before editing."""
+def concept_messages(
+    concept: SeedConcept,
+    *,
+    seed: SeedFile,
+    min_sentences: int = 0,
+    min_substitutions: int = 0,
+    min_dialogues: int = 0,
+) -> list[Message]:
+    """The prompt for one concept. See the R7 block above before editing.
+
+    The counts are stated here as well as in the schema's ``minItems``. That is
+    not redundancy: ``minItems`` is a hint a provider may reject outright —
+    strict structured output accepts only a subset of JSON Schema, and which
+    subset has moved — and a schema keyword nobody reads is a requirement that
+    silently becomes optional. Said in the prompt, it survives any provider
+    (D-104). validate.py is what actually enforces it either way.
+    """
     lines = [
         f"Level: {seed.meta.level} ({seed.meta.language}).",
         f"Grammar point: {concept.standard_ref or '(unnumbered)'}",
         f"Pattern: {concept.pattern}",
         f"Spoken task types this point is graded as: {', '.join(concept.hskk_task_types)}.",
     ]
+    if min_sentences or min_substitutions or min_dialogues:
+        lines.append(
+            "Write at least "
+            f"{min_sentences} target sentences, "
+            f"{min_substitutions} substitution items and "
+            f"{min_dialogues} dialogue tasks. Fewer than that is rejected."
+        )
     if concept.example_sentences:
         lines.append(
             "Example sentences from the standard, for calibration of level and "
@@ -253,16 +275,17 @@ async def generate(
     every_result: list[CompletionResult] = []
     model = ""
 
+    counts = {
+        "min_sentences": settings.pipeline_min_sentences_per_concept,
+        "min_substitutions": settings.pipeline_min_substitutions_per_concept,
+        "min_dialogues": settings.pipeline_min_dialogues_per_concept,
+    }
+
     for task_types, members in groups.items():
         results = await llm.batch_complete(
-            [concept_messages(concept, seed=seed) for concept in members],
+            [concept_messages(concept, seed=seed, **counts) for concept in members],
             purpose=Purpose.OFFLINE_GENERATION,
-            json_schema=response_schema(
-                min_sentences=settings.pipeline_min_sentences_per_concept,
-                min_substitutions=settings.pipeline_min_substitutions_per_concept,
-                min_dialogues=settings.pipeline_min_dialogues_per_concept,
-                task_types=task_types,
-            ),
+            json_schema=response_schema(task_types=task_types, **counts),
         )
         every_result.extend(results)
 

@@ -8,6 +8,7 @@ wrong and invisible afterwards: the prompt carrying material it must not
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import re
 from pathlib import Path
@@ -451,3 +452,62 @@ def test_a_well_formed_concept_draft_is_accepted() -> None:
     concept = ConceptDraft.model_validate(_a_concept())
 
     assert concept.dialogues[0].hskk_task_type == "listen_and_repeat"
+
+
+# ------------------------------------------------- the counts, said twice
+#
+# D-104. minItems is a schema keyword a provider may reject or ignore — strict
+# structured output takes only a subset of JSON Schema and which subset has
+# moved — so the requirement is also stated in the prompt, where no provider
+# can drop it. Neither is the enforcement: validate.py is.
+
+
+def test_the_prompt_states_how_much_to_write() -> None:
+    seed = a_seed()
+
+    messages = concept_messages(
+        seed.concepts[0], seed=seed, min_sentences=8, min_substitutions=12, min_dialogues=3
+    )
+    said = " ".join(message.content for message in messages)
+
+    assert "8 target sentences" in said
+    assert "12 substitution items" in said
+    assert "3 dialogue tasks" in said
+
+
+def test_a_run_tells_the_model_the_configured_counts() -> None:
+    """The prompt and the schema have to agree, and both come from config."""
+    seed = a_seed()
+    configured = settings(
+        pipeline_min_sentences_per_concept=6,
+        pipeline_min_substitutions_per_concept=9,
+        pipeline_min_dialogues_per_concept=2,
+    )
+    recorded: list[str] = []
+
+    class _Recording(FakeLLM):
+        async def batch_complete(self, batches: list[list[Message]], **kwargs: Any) -> Any:
+            recorded.extend(m.content for batch in batches for m in batch)
+            return await super().batch_complete(batches, **kwargs)
+
+    draft = asyncio.run(
+        generate(
+            seed,
+            llm=_Recording(),
+            settings=configured,
+            seed_file=Path("test.yaml"),
+            now=dt.datetime(2026, 10, 13, tzinfo=dt.UTC),
+        )
+    )
+
+    assert "6 target sentences" in " ".join(recorded)
+    assert len(draft.concepts[0].target_sentences) == 6  # the schema says so too
+
+
+def test_the_counts_are_left_out_when_nobody_asks_for_them() -> None:
+    """concept_messages is also called in tests and tools that do not care."""
+    seed = a_seed()
+
+    said = " ".join(m.content for m in concept_messages(seed.concepts[0], seed=seed))
+
+    assert "at least" not in said
