@@ -251,7 +251,10 @@ def test_the_file_a_reviewer_opens_has_the_columns_they_need(tmp_path: Path) -> 
         read_back = list(csv.DictReader(handle))
 
     assert list(read_back[0]) == list(COLUMNS)
-    assert all(row["verdict"] == "" and row["comment"] == "" for row in read_back)
+    assert all(
+        row["verdict"] == "" and row["correction"] == "" and row["comment"] == ""
+        for row in read_back
+    )
     assert any(KM in row["khmer"] for row in read_back)
 
 
@@ -386,3 +389,27 @@ def test_only_the_explanation_rows_are_left_marked() -> None:
 def test_the_derived_reading_uses_tone_marks_not_digits() -> None:
     """Same notation as the stored ones, so the column reads as one column."""
     assert reading_of("老师") == "lǎo shī"
+
+
+def test_the_correction_has_a_column_of_its_own() -> None:
+    """Pulling it out of free text means guessing where the corrected Khmer
+    stops and the reasoning starts, and a wrong guess writes an explanation
+    into the course."""
+    assert COLUMNS.index("correction") == COLUMNS.index("verdict") + 1
+    assert COLUMNS.index("comment") == COLUMNS.index("correction") + 1
+
+
+def test_both_columns_a_reviewer_fills_start_empty(tmp_path: Path) -> None:
+    for row in select(a_draft(), rate=1.0):
+        assert row.correction == ""
+        assert row.comment == ""
+
+
+def test_the_covering_note_asks_for_the_correction_and_the_reason(
+    tmp_path: Path,
+) -> None:
+    text = instructions(tmp_path / "review.csv", select(a_draft(), rate=0.10))
+
+    assert "'correction'" in text
+    assert "share" in text
+    assert "BOTH" in text
