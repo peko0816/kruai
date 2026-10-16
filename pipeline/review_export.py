@@ -35,6 +35,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
 
+from pypinyin import Style, pinyin
+
 from app.core.config import get_settings
 from pipeline.draft import ConceptDraft, Draft
 
@@ -68,6 +70,23 @@ COLUMNS: Final[tuple[str, ...]] = (
     "comment",
 )
 
+
+def reading_of(chinese: str) -> str:
+    """Pinyin for a line that has none stored, for display only.
+
+    Regenerated the same way validate.py's rule 3 regenerates it to check the
+    stored ones, so the two agree on notation. Without context pypinyin picks
+    one reading of a heteronym, which is a risk worth taking for a column the
+    reviewer is told is context.
+    """
+    return " ".join(syllable[0] for syllable in pinyin(chinese, style=Style.TONE, errors="ignore"))
+
+
+#: Written into a cell that has nothing to hold, so it reads as deliberate.
+#: Three of the four strata leave a column or two empty by their nature, and a
+#: sheet with ragged blanks looks like one whose columns have slipped.
+NOT_APPLICABLE: Final = "—"
+
 #: What a reviewer may write in `verdict`. Three values, not two: "understandable
 #: but nobody would say it that way" is the judgement a native speaker is for,
 #: and it is not the same as wrong.
@@ -96,8 +115,13 @@ def rows_of(concept: ConceptDraft) -> Iterator[Row]:
         kind="km_explanation",
         concept=concept.slug,
         pattern=concept.pattern,
-        chinese="",
-        pinyin="",
+        # An explanation renders a pattern, not a sentence, so there is no
+        # Chinese line to set beside it — `pattern` is its context. Written as
+        # NOT_APPLICABLE rather than left blank: in a spreadsheet a blank cell
+        # reads as data that went missing, and these are the five rows the
+        # whole review exists for.
+        chinese=NOT_APPLICABLE,
+        pinyin=NOT_APPLICABLE,
         khmer=concept.km_explanation,
     )
     for index, sentence in enumerate(concept.target_sentences):
@@ -126,11 +150,19 @@ def rows_of(concept: ConceptDraft) -> Iterator[Row]:
             kind="dialogue",
             concept=concept.slug,
             pattern=concept.pattern,
-            # Both halves, because the question and the model answer are judged
-            # together: a good answer to a question nobody would ask is not a
-            # usable turn.
-            chinese=f"{dialogue.prompt_zh} → {dialogue.sample_answer_zh}",
-            pinyin="",
+            # The prompt alone. It used to carry the model answer too, on the
+            # grounds that a turn is judged as a pair — but the Khmer in this
+            # row is only the prompt's, so that put two Chinese sentences
+            # against one Khmer one and read as a misaligned row. Whether the
+            # answer suits the question is Chinese-side work that validate.py
+            # and the fixes sheet already cover.
+            chinese=dialogue.prompt_zh,
+            # Derived here rather than carried: a Dialogue has no pinyin field,
+            # so these fifteen cells were the only ones empty for want of data
+            # rather than by their nature. It is context, not the thing being
+            # judged, and a reviewer reading the Chinese aloud should not be
+            # the one stratum left without it.
+            pinyin=reading_of(dialogue.prompt_zh),
             khmer=dialogue.prompt_km,
         )
 

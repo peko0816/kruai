@@ -24,9 +24,11 @@ from pipeline.draft import Draft
 from pipeline.review_export import (
     COLUMNS,
     ENCODING,
+    NOT_APPLICABLE,
     STRATA,
     VERDICTS,
     instructions,
+    reading_of,
     sample_size,
     select,
     write_csv,
@@ -275,10 +277,18 @@ def test_every_row_can_be_traced_back_to_the_item_it_came_from() -> None:
         )
 
 
-def test_a_dialogue_row_shows_both_halves_of_the_turn() -> None:
+def test_a_dialogue_row_shows_the_prompt_the_khmer_renders() -> None:
+    """Replaces an assertion that it showed both halves (D-119).
+
+    The Khmer on this row is the prompt's and only the prompt's, so gluing the
+    model answer into the Chinese cell set two sentences against one — which
+    is what a reader called a misaligned row. Whether the answer suits the
+    question is Chinese-side work, and the fixes sheet carries it.
+    """
     rows = [row for row in select(a_draft(), rate=1.0) if row.kind == "dialogue"]
 
-    assert "→" in rows[0].chinese
+    assert rows
+    assert "→" not in rows[0].chinese
 
 
 def test_the_instructions_name_every_verdict_a_reviewer_may_write(tmp_path: Path) -> None:
@@ -323,3 +333,56 @@ def test_the_csv_lands_beside_the_draft_by_default(
     review_export.main([str(draft)])
 
     assert (tmp_path / "zh-HSK1.review.csv").exists()
+
+
+# ------------------------------- the sheet a person actually scans (D-119)
+#
+# Reported from the file rather than from the code: "存在空格和内容错列了".
+# The CSV parsed cleanly — 117 rows, nine fields each. What was wrong is that
+# three of the four strata leave a different column blank, so the Khmer sits
+# at a different place on each row and the sheet reads as slipped.
+
+
+def test_no_cell_is_left_blank() -> None:
+    """A blank cell reads as data that went missing. The strata that have
+    nothing to put in a column say so."""
+    for row in select(a_draft(), rate=1.0):
+        for value in (row.pattern, row.chinese, row.pinyin, row.khmer):
+            assert value.strip(), f"{row.id} has an empty cell"
+
+
+def test_the_columns_a_reviewer_judges_are_never_not_applicable() -> None:
+    """Only context columns may be marked; the Khmer is the work."""
+    for row in select(a_draft(), rate=1.0):
+        assert row.khmer != NOT_APPLICABLE
+        assert row.pattern != NOT_APPLICABLE
+
+
+def test_a_dialogue_row_carries_pinyin_even_though_the_draft_has_none() -> None:
+    """Fifteen of the twenty-five marked cells were empty for want of data
+    rather than by their nature: a Dialogue has no pinyin field. Derived for
+    display, so the one stratum a reviewer might read aloud is not the one
+    without it."""
+    rows = [row for row in select(a_draft(), rate=1.0) if row.kind == "dialogue"]
+
+    assert rows
+    for row in rows:
+        assert row.pinyin != NOT_APPLICABLE
+        assert row.pinyin.strip()
+
+
+def test_only_the_explanation_rows_are_left_marked() -> None:
+    """What remains is structural: an explanation renders a pattern, so there
+    is no single Chinese line or reading to set beside it."""
+    marked = {
+        row.kind
+        for row in select(a_draft(), rate=1.0)
+        if NOT_APPLICABLE in (row.chinese, row.pinyin)
+    }
+
+    assert marked == {"km_explanation"}
+
+
+def test_the_derived_reading_uses_tone_marks_not_digits() -> None:
+    """Same notation as the stored ones, so the column reads as one column."""
+    assert reading_of("老师") == "lǎo shī"
