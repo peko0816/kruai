@@ -33,6 +33,11 @@ SUPPORTED_LOCALES: Final[tuple[str, ...]] = ("km", "zh", "en")
 #: What a learner falls back to when their locale is not one we ship.
 DEFAULT_LOCALE: Final = "km"
 
+#: Where the original text lives. Not the same as DEFAULT_LOCALE: Khmer is
+#: what a learner falls back to, English is what a translator works from, and
+#: anything asking "what does this string actually say" means this one.
+SOURCE_LOCALE: Final = "en"
+
 
 class MissingMessageError(KeyError):
     """A key no catalogue defines.
@@ -67,6 +72,22 @@ def normalise_locale(locale: str | None) -> str:
 def is_placeholder(value: str) -> bool:
     """True for an untranslated entry, e.g. ``[[km:bot.welcome]]``."""
     return value.startswith("[[") and value.endswith("]]")
+
+
+def is_deliberately_empty(english: str) -> bool:
+    """True for a key whose source text is empty on purpose.
+
+    ``bot.status_unlimited`` is the only one today: it is the ``{limit_suffix}``
+    a status line gets when there is no limit, and the correct content for it
+    in every language is nothing at all.
+
+    It has to be named rather than inferred at each call site, because three
+    places disagreed about it — the export offered it as work no translation
+    could satisfy, the check counted it as pending for ever, and the catalogues
+    carried a placeholder that would have rendered to a paying learner as
+    a status line with ``[[zh:bot.status_unlimited]]`` printed inside it
+    """
+    return english == ""
 
 
 def t(key: str, *, locale: str = DEFAULT_LOCALE, **params: object) -> str:

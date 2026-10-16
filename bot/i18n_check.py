@@ -77,6 +77,10 @@ class Findings:
     inline_strings: list[str] = field(default_factory=list)
     #: locale -> keys still awaiting a translator.
     placeholders_by_locale: dict[str, set[str]] = field(default_factory=dict)
+    #: locale -> keys whose English is empty on purpose but which hold text
+    #: here. Blocking, because the text renders: the suffix that should be
+    #: nothing becomes something, in one language only.
+    unwanted_text_by_locale: dict[str, set[str]] = field(default_factory=dict)
     #: Keys nobody references. Reported: a key a client will need later is not
     #: a defect, but a key nobody ever uses is translation work wasted.
     unreferenced_keys: set[str] = field(default_factory=set)
@@ -91,6 +95,12 @@ class Findings:
         for locale, keys in sorted(self.extra_by_locale.items()):
             if keys:
                 problems.append(f"{locale}.json defines {len(keys)} unknown key(s): {sorted(keys)}")
+        for locale, keys in sorted(self.unwanted_text_by_locale.items()):
+            if keys:
+                problems.append(
+                    f"{locale}.json gives text to {len(keys)} key(s) whose English is "
+                    f"empty on purpose; it renders: {sorted(keys)}"
+                )
         problems.extend(f"unknown message key at {where}" for where in self.unknown_keys)
         problems.extend(
             f"user-visible string written in Python at {where}" for where in self.inline_strings
@@ -173,11 +183,23 @@ def run(
     )
     reference = set(entries_by_locale[default])
 
+    # The source text, not the fallback one: DEFAULT_LOCALE is km.
+    english = entries_by_locale.get(i18n.SOURCE_LOCALE, {})
+    #: Keys that are blank on purpose. Neither pending nor translatable.
+    deliberately_empty = {
+        key for key, value in english.items() if i18n.is_deliberately_empty(value)
+    }
+
     for locale, entries in entries_by_locale.items():
         findings.missing_by_locale[locale] = reference - set(entries)
         findings.extra_by_locale[locale] = set(entries) - reference
         findings.placeholders_by_locale[locale] = {
-            key for key, value in entries.items() if i18n.is_placeholder(value)
+            key
+            for key, value in entries.items()
+            if i18n.is_placeholder(value) and key not in deliberately_empty
+        }
+        findings.unwanted_text_by_locale[locale] = {
+            key for key in deliberately_empty if entries.get(key, "") != ""
         }
 
     referenced: set[str] = set()
@@ -200,7 +222,13 @@ def report(findings: Findings, *, strict: bool) -> int:
 
     for locale in sorted(findings.placeholders_by_locale, key=i18n.SUPPORTED_LOCALES.index):
         pending = findings.placeholders_by_locale.get(locale, set())
-        total = len(i18n.catalogue(locale))
+        # The denominator counts what a translator can act on, so a key that is
+        # blank on purpose does not sit in it making the work look unfinished.
+        total = sum(
+            1
+            for value in i18n.catalogue(i18n.SOURCE_LOCALE).values()
+            if not i18n.is_deliberately_empty(value)
+        )
         state = "complete" if not pending else f"{len(pending)}/{total} awaiting a translator"
         print(f"{locale}: {state}")
 
