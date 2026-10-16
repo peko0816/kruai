@@ -35,6 +35,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
 
+from pypinyin import Style, pinyin
+
 from app.core.config import get_settings
 from pipeline.draft import ConceptDraft, Draft
 
@@ -67,6 +69,18 @@ COLUMNS: Final[tuple[str, ...]] = (
     "verdict",
     "comment",
 )
+
+
+def reading_of(chinese: str) -> str:
+    """Pinyin for a line that has none stored, for display only.
+
+    Regenerated the same way validate.py's rule 3 regenerates it to check the
+    stored ones, so the two agree on notation. Without context pypinyin picks
+    one reading of a heteronym, which is a risk worth taking for a column the
+    reviewer is told is context.
+    """
+    return " ".join(syllable[0] for syllable in pinyin(chinese, style=Style.TONE, errors="ignore"))
+
 
 #: Written into a cell that has nothing to hold, so it reads as deliberate.
 #: Three of the four strata leave a column or two empty by their nature, and a
@@ -143,7 +157,12 @@ def rows_of(concept: ConceptDraft) -> Iterator[Row]:
             # answer suits the question is Chinese-side work that validate.py
             # and the fixes sheet already cover.
             chinese=dialogue.prompt_zh,
-            pinyin=NOT_APPLICABLE,
+            # Derived here rather than carried: a Dialogue has no pinyin field,
+            # so these fifteen cells were the only ones empty for want of data
+            # rather than by their nature. It is context, not the thing being
+            # judged, and a reviewer reading the Chinese aloud should not be
+            # the one stratum left without it.
+            pinyin=reading_of(dialogue.prompt_zh),
             khmer=dialogue.prompt_km,
         )
 

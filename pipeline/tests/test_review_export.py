@@ -28,6 +28,7 @@ from pipeline.review_export import (
     STRATA,
     VERDICTS,
     instructions,
+    reading_of,
     sample_size,
     select,
     write_csv,
@@ -355,3 +356,33 @@ def test_the_columns_a_reviewer_judges_are_never_not_applicable() -> None:
     for row in select(a_draft(), rate=1.0):
         assert row.khmer != NOT_APPLICABLE
         assert row.pattern != NOT_APPLICABLE
+
+
+def test_a_dialogue_row_carries_pinyin_even_though_the_draft_has_none() -> None:
+    """Fifteen of the twenty-five marked cells were empty for want of data
+    rather than by their nature: a Dialogue has no pinyin field. Derived for
+    display, so the one stratum a reviewer might read aloud is not the one
+    without it."""
+    rows = [row for row in select(a_draft(), rate=1.0) if row.kind == "dialogue"]
+
+    assert rows
+    for row in rows:
+        assert row.pinyin != NOT_APPLICABLE
+        assert row.pinyin.strip()
+
+
+def test_only_the_explanation_rows_are_left_marked() -> None:
+    """What remains is structural: an explanation renders a pattern, so there
+    is no single Chinese line or reading to set beside it."""
+    marked = {
+        row.kind
+        for row in select(a_draft(), rate=1.0)
+        if NOT_APPLICABLE in (row.chinese, row.pinyin)
+    }
+
+    assert marked == {"km_explanation"}
+
+
+def test_the_derived_reading_uses_tone_marks_not_digits() -> None:
+    """Same notation as the stored ones, so the column reads as one column."""
+    assert reading_of("老师") == "lǎo shī"
