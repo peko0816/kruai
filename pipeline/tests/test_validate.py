@@ -703,3 +703,56 @@ def test_a_draft_level_violation_does_not_claim_a_concept() -> None:
 
     assert rows[0]["concept"] == ""
     assert rows[0]["chinese"] == ""
+
+
+# ----------------------- a gloss has to be readable by its reader (D-120)
+#
+# Rule 4 asked for Khmer and got it: `ប្រាក់ប្រាំ元។` contains Khmer. It also
+# contains the one word in the phrase a Khmer reader needed, left in Chinese.
+# Eighteen of those shipped in the first real level.
+
+
+def test_a_gloss_may_not_leave_chinese_in_it() -> None:
+    problems = check_khmer("ប្រាក់ប្រាំ元។", where="x", is_gloss=True)
+
+    assert rules(problems) == ["khmer"]
+    assert "元" in problems[0].message
+
+
+def test_the_same_text_is_fine_in_an_explanation() -> None:
+    """D-079: an explanation quotes the pattern it explains, and banning that
+    rejects the clearest ones. Only glosses are tightened."""
+    assert check_khmer("ប្រាក់ប្រាំ元។", where="x") == []
+
+
+def test_a_dialogue_prompt_may_name_the_chinese_to_say() -> None:
+    """`សូមនិយាយ៖ 我吃了饭。` is a correct prompt: the learner is being told
+    which Chinese sentence to produce."""
+    assert check_khmer("សូមនិយាយ៖ 我吃了饭。", where="x") == []
+
+
+def test_a_clean_gloss_still_passes() -> None:
+    assert check_khmer(KM, where="x", is_gloss=True) == []
+
+
+def test_the_tightening_reaches_both_kinds_of_gloss() -> None:
+    """target_sentences and substitutions, not just one of them."""
+    configured = settings(
+        pipeline_min_sentences_per_concept=1,
+        pipeline_min_substitutions_per_concept=1,
+        pipeline_min_dialogues_per_concept=1,
+    )
+    broken = a_concept(
+        target_sentences=[{"zh": "我要水。", "pinyin": "wǒ yào shuǐ", "km_gloss": f"{KM}元"}],
+        substitutions=[{"zh": "水", "pinyin": "shuǐ", "km_gloss": f"{KM}分"}],
+    )
+    problems = validate(
+        a_draft(concepts=[broken.model_dump()]),
+        settings=configured,
+        wordlist=a_wordlist("我", "要", "水", "你"),
+    )
+
+    where = [p.where for p in problems if p.rule == "khmer"]
+    assert len(where) == 2
+    assert any("target_sentences" in w for w in where)
+    assert any("substitutions" in w for w in where)

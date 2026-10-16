@@ -246,8 +246,22 @@ def _prefix_of(text: str, bare_length: int) -> str:
     return text
 
 
-def check_khmer(text: str, *, where: str) -> list[Violation]:
-    """Rule 4. A Khmer field has to be Khmer: not English, not Chinese, not a placeholder."""
+def check_khmer(text: str, *, where: str, is_gloss: bool = False) -> list[Violation]:
+    """Rule 4. A Khmer field has to be Khmer: not English, not Chinese, not a placeholder.
+
+    ``is_gloss`` tightens it to "and no Chinese either". Only two of the four
+    Khmer fields are glosses, and the distinction is the whole point:
+
+    * A **gloss** says what a Chinese line means, for somebody who cannot read
+      Chinese. A character left in it is untranslated, not quoted — and the
+      first real level shipped eighteen of them, ``ប្រាក់ប្រាំ元។`` among
+      others, where 元 is the one word in the phrase the reader needed.
+    * An **explanation** quotes the pattern it is explaining, and a dialogue
+      prompt tells a learner which Chinese sentence to say. Both have to carry
+      Chinese; D-079 argued that banning it there rejects the clearest ones.
+
+    Rule 4 as it stood passed all eighteen: they do contain Khmer.
+    """
     if not text.strip():
         return [Violation("khmer", where, "empty")]
     if _PLACEHOLDER.search(text):
@@ -266,6 +280,17 @@ def check_khmer(text: str, *, where: str) -> list[Violation]:
                 f"no Khmer script (U+1780-U+17FF): {text!r}",
             )
         ]
+    if is_gloss:
+        left = sorted(set(_HAN.findall(text)))
+        if left:
+            return [
+                Violation(
+                    "khmer",
+                    where,
+                    f"leaves {left} untranslated; a gloss is read by somebody who "
+                    f"cannot read Chinese: {text!r}",
+                )
+            ]
     return []
 
 
@@ -388,14 +413,14 @@ def validate(draft: Draft, *, settings: Settings, wordlist: Wordlist) -> list[Vi
             problems += check_length(sentence.zh, maximum=maximum, where=at)
             problems += check_wordlist(sentence.zh, wordlist, where=at)
             problems += check_pinyin(sentence.zh, sentence.pinyin, where=at)
-            problems += check_khmer(sentence.km_gloss, where=f"{at}.km_gloss")
+            problems += check_khmer(sentence.km_gloss, where=f"{at}.km_gloss", is_gloss=True)
             by_kind["target_sentences"].append((at, sentence.zh))
 
         for position, substitution in enumerate(concept.substitutions):
             at = f"{where}.substitutions[{position}]"
             problems += check_wordlist(substitution.zh, wordlist, where=at)
             problems += check_pinyin(substitution.zh, substitution.pinyin, where=at)
-            problems += check_khmer(substitution.km_gloss, where=f"{at}.km_gloss")
+            problems += check_khmer(substitution.km_gloss, where=f"{at}.km_gloss", is_gloss=True)
 
         for position, dialogue in enumerate(concept.dialogues):
             at = f"{where}.dialogues[{position}]"
