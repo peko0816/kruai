@@ -67,6 +67,7 @@ COLUMNS: Final[tuple[str, ...]] = (
     "pinyin",
     "khmer",
     "verdict",
+    "correction",
     "comment",
 )
 
@@ -105,6 +106,20 @@ class Row:
     pinyin: str
     khmer: str
     verdict: str = ""
+    #: What it should say instead. Its own column rather than the first half
+    #: of `comment`: the corrected Khmer is applied to the draft mechanically,
+    #: and pulling it out of free text means guessing where the correction
+    #: stops and the reasoning starts — a guess that writes an explanation
+    #: into the course when it goes wrong.
+    #:
+    #: Named `correction` and not `translation` because the i18n sheets
+    #: already use that word for a column filled on every row; this one is
+    #: filled only where something is wrong, and the same person fills both.
+    correction: str = ""
+    #: Why. Required alongside the correction, because the shape of a fault
+    #: decides what we do about it: "the numbers are all built wrong" is the
+    #: difference between patching eighteen cells and regenerating the concept
+    #: that produced them.
     comment: str = ""
 
 
@@ -232,7 +247,11 @@ def instructions(path: Path, rows: Sequence[Row]) -> str:
             "  · Fill in 'verdict' for every row: "
             + " / ".join(VERDICTS)
             + " — 'awkward' means understandable but not what a Khmer speaker would say.",
-            "  · Put the correction in 'comment' whenever the verdict is not 'ok'.",
+            "  · Whenever the verdict is not 'ok', fill in BOTH:",
+            "      'correction' — the Khmer it should say, and nothing else",
+            "      'comment'    — why, in a sentence. Say so when several rows share",
+            "                     a cause: that decides whether we patch cells or",
+            "                     regenerate what produced them.",
             "  · Do not edit any other column; 'id' is how the answers are matched back.",
             "  · Open it in a spreadsheet, not a text editor, and keep it as CSV.",
         ]
