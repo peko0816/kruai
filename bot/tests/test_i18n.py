@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from bot import i18n
+from bot import i18n, i18n_handoff
 
 
 def test_every_locale_defines_the_same_keys() -> None:
@@ -70,12 +70,37 @@ def test_the_english_catalogue_carries_no_placeholders() -> None:
     assert [key for key, value in entries.items() if i18n.is_placeholder(value)] == []
 
 
-@pytest.mark.parametrize("locale", ["km", "zh"])
+@pytest.mark.parametrize("locale", ["km"])
 def test_the_untranslated_catalogues_are_entirely_placeholders(locale: str) -> None:
-    """Half-translated would be worse than untranslated: it reads as finished."""
+    """Half-translated would be worse than untranslated: it reads as finished.
+
+    A key whose English is blank on purpose is the one exception, and it is
+    blank here too rather than carrying a placeholder — a placeholder in that
+    slot renders (D-118).
+    """
+    english = i18n.catalogue(i18n.SOURCE_LOCALE)
     entries = i18n.catalogue(locale)
 
-    assert all(i18n.is_placeholder(value) for value in entries.values())
+    for key, value in entries.items():
+        if i18n.is_deliberately_empty(english[key]):
+            assert value == "", f"{locale}.{key} should be blank, not {value!r}"
+        else:
+            assert i18n.is_placeholder(value), f"{locale}.{key} is not a placeholder"
+
+
+def test_no_catalogue_holds_the_english_unchanged() -> None:
+    """The invariant that survives a catalogue being part-translated: zh is
+    27 of 29 done, so "everything is still a placeholder" stopped being true
+    of it, but a row copied across from English never becomes acceptable.
+    """
+    english = i18n.catalogue(i18n.SOURCE_LOCALE)
+    for locale in i18n.SUPPORTED_LOCALES:
+        if locale == i18n.SOURCE_LOCALE:
+            continue
+        for key, value in i18n.catalogue(locale).items():
+            if i18n.is_placeholder(value):
+                continue
+            assert not i18n_handoff.is_untranslated(value, english[key]), f"{locale}.{key}"
 
 
 def test_the_catalogues_are_valid_json_on_disk() -> None:

@@ -45,16 +45,12 @@ COLUMNS: Final[tuple[str, ...]] = ("key", "english", "parameters", "used_at", "t
 #: ``{resets_at}`` and friends. str.format names, which is what i18n.t uses.
 _PARAMETER: Final = re.compile(r"\{(\w+)\}")
 
-#: Khmer, U+1780-U+17FF (CODING_STANDARDS section 11).
-_KHMER: Final = re.compile(r"[\u1780-\u17ff]")
-
-#: Han, for the Chinese catalogue.
-_HAN: Final = re.compile(r"[\u4e00-\u9fff]")
-
-#: What a finished translation has to contain, per locale. English has none —
-#: it is the source — and a locale added later needs a row here, which is the
-#: point of making it a table rather than an `if`.
-SCRIPTS: Final[dict[str, re.Pattern[str]]] = {"km": _KHMER, "zh": _HAN}
+#: Each target locale's own script. Used to catch a row filled in for the
+#: wrong sheet, not to require the script be present — see is_untranslated.
+SCRIPTS: Final[dict[str, re.Pattern[str]]] = {
+    "km": re.compile(r"[\u1780-\u17ff]"),  # Khmer
+    "zh": re.compile(r"[\u4e00-\u9fff]"),  # Han
+}
 
 
 @dataclass(frozen=True)
@@ -70,6 +66,61 @@ def parameters_of(text: str) -> tuple[str, ...]:
     return tuple(sorted(set(_PARAMETER.findall(text))))
 
 
+def _without_parameters(text: str) -> str:
+    return " ".join(_PARAMETER.sub(" ", text).split())
+
+
+def has_translatable_words(english: str) -> bool:
+    """Is there anything in this string to translate at all?
+
+    ``bot.explain`` is the whole string ``{text}`` — a slot the app fills with
+    content that is already in the learner's language. The only correct
+    "translation" of it is itself.
+    """
+    return any(character.isalpha() for character in _without_parameters(english))
+
+
+def wrong_language(text: str, *, locale: str) -> str | None:
+    """The locale this text looks like it was written for, if not ``locale``.
+
+    Asked this way round on purpose. Requiring the target script rejects
+    correct work — ``/ {limit}`` is a complete Chinese rendering of
+    ``of {limit}`` and has no Han in it (D-118). But text carrying *another*
+    target's script and none of its own is a row filled into the wrong sheet,
+    which is an easy mistake when one person has both open.
+
+    A Khmer string quoting the Chinese it teaches still has Khmer in it, so it
+    is not caught; that is the case this phrasing exists to let through.
+    """
+    mine = SCRIPTS.get(locale)
+    if mine is None or mine.search(text):
+        return None
+    for other, script in SCRIPTS.items():
+        if other != locale and script.search(text):
+            return other
+    return None
+
+
+def is_untranslated(text: str, english: str) -> bool:
+    """Was this row left in English rather than translated?
+
+    This replaced "the translation must contain Khmer or Han characters"
+    (D-118). That rule had the right target and the wrong test: it rejected
+    two correct translations — ``{text}`` for ``{text}``, and ``/ {limit}``
+    for ``of {limit}``, which is how a Chinese status line writes 3/50 — while
+    a string with nothing to translate can have no script in it by definition.
+
+    What it was really guarding is a row copied across unchanged, so that is
+    what is tested. Weaker in one direction, and knowingly: a translator who
+    paraphrases in English rather than copying now gets through, where the
+    script test would have caught them. The native-speaker review is the
+    backstop for that; a rule that rejects correct work has no backstop.
+    """
+    if not has_translatable_words(english):
+        return False
+    return _without_parameters(text).casefold() == _without_parameters(english).casefold()
+
+
 def usage_sites() -> dict[str, str]:
     """key -> where the code uses it, so a translator can tell a button from a sentence."""
     sites: dict[str, list[str]] = {}
@@ -80,13 +131,22 @@ def usage_sites() -> dict[str, str]:
 
 
 def pending(locale: str) -> list[str]:
-    """Keys still carrying a placeholder, in catalogue order."""
+    """Keys still carrying a placeholder, in catalogue order.
+
+    A key whose English is empty on purpose is not pending and never will be:
+    offering it is asking for a translation that would be wrong if given.
+    """
+    english = i18n.catalogue(i18n.SOURCE_LOCALE)
     catalogue = i18n.catalogue(locale)
-    return [key for key, value in catalogue.items() if i18n.is_placeholder(value)]
+    return [
+        key
+        for key, value in catalogue.items()
+        if i18n.is_placeholder(value) and not i18n.is_deliberately_empty(english.get(key, ""))
+    ]
 
 
 def rows_for(locale: str, *, everything: bool = False) -> list[Row]:
-    english = i18n.catalogue("en")
+    english = i18n.catalogue(i18n.SOURCE_LOCALE)
     catalogue = i18n.catalogue(locale)
     sites = usage_sites()
     wanted = sorted(catalogue) if everything else sorted(pending(locale))
@@ -140,9 +200,8 @@ def check_translations(
     filled: dict[str, str], *, locale: str
 ) -> tuple[dict[str, str], list[Problem]]:
     """Split a filled sheet into what can be applied and what cannot."""
-    english = i18n.catalogue("en")
+    english = i18n.catalogue(i18n.SOURCE_LOCALE)
     catalogue = i18n.catalogue(locale)
-    script = SCRIPTS.get(locale)
 
     good: dict[str, str] = {}
     problems: list[Problem] = []
@@ -167,9 +226,15 @@ def check_translations(
                 )
             )
             continue
-        if script is not None and not script.search(text):
+        if is_untranslated(text, english.get(key, "")):
             problems.append(
-                Problem(key, f"is not written in {locale}; an untranslated row reads as finished")
+                Problem(key, "is the English unchanged; a copied row reads as finished")
+            )
+            continue
+        other = wrong_language(text, locale=locale)
+        if other is not None:
+            problems.append(
+                Problem(key, f"is written in {other}, not {locale}; was this the wrong sheet?")
             )
             continue
         good[key] = text

@@ -271,3 +271,54 @@ def test_the_checker_reads_both_the_bot_and_the_backend() -> None:
     assert "handlers.py" in scanned
     assert "attempts.py" in scanned
     assert "resolve.py" in scanned
+
+
+# ------------------------------- keys that are blank on purpose (D-118)
+#
+# bot.status_unlimited is the {limit_suffix} a status line gets when there is
+# no limit. Its English is "" and so is every correct translation of it.
+# Counted as pending it never reaches zero; carried as a placeholder it
+# renders, and only to the learners on an unlimited plan.
+
+
+def test_a_blank_key_is_not_awaiting_a_translator() -> None:
+    findings = i18n_check.run(
+        roots=(),
+        catalogues=catalogues(
+            km={
+                "bot.welcome": "[[km:bot.welcome]]",
+                "bot.no_suffix": "[[km:bot.no_suffix]]",
+            },
+            en={"bot.welcome": "Hello", "bot.no_suffix": ""},
+        ),
+    )
+
+    assert findings.placeholders_by_locale["km"] == {"bot.welcome"}
+
+
+def test_text_where_the_english_is_blank_is_found_and_blocks() -> None:
+    """The bug this was found through: a placeholder sitting in the suffix
+    prints `[[zh:bot.status_unlimited]]` inside a paying learner's status line."""
+    findings = i18n_check.run(
+        roots=(),
+        catalogues=catalogues(
+            km={"bot.no_suffix": "[[km:bot.no_suffix]]"},
+            en={"bot.no_suffix": ""},
+        ),
+    )
+
+    assert findings.unwanted_text_by_locale["km"] == {"bot.no_suffix"}
+    assert any("empty on purpose" in problem for problem in findings.blocking)
+
+
+def test_any_text_there_blocks_not_only_a_placeholder() -> None:
+    """A translator who writes something helpful is the same bug."""
+    findings = i18n_check.run(
+        roots=(),
+        catalogues=catalogues(
+            km={"bot.no_suffix": "គ្មានដែនកំណត់"},
+            en={"bot.no_suffix": ""},
+        ),
+    )
+
+    assert findings.unwanted_text_by_locale["km"] == {"bot.no_suffix"}

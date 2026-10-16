@@ -27,6 +27,6 @@
   "bot.scoring_unavailable": "[[km:bot.scoring_unavailable]]",
   "bot.status": "[[km:bot.status]]",
   "bot.status_limit_suffix": "[[km:bot.status_limit_suffix]]",
-  "bot.status_unlimited": "[[km:bot.status_unlimited]]",
+  "bot.status_unlimited": "",
   "bot.welcome": "[[km:bot.welcome]]"
 }
