@@ -237,6 +237,14 @@ def test_the_sample_does_not_change_between_processes(tmp_path: Path) -> None:
     assert outputs[0] == outputs[1]
 
 
+def data_rows(path: Path) -> list[dict[str, str]]:
+    """The rows a reviewer fills in, past the notes at the top."""
+    with path.open(encoding=ENCODING, newline="") as handle:
+        lines = [row for row in csv.reader(handle) if not (row and row[0].startswith("#"))]
+    header, *body = lines
+    return [dict(zip(header, row, strict=False)) for row in body]
+
+
 # --------------------------------------------------------------------- CSV
 
 
@@ -245,8 +253,7 @@ def test_the_file_a_reviewer_opens_has_the_columns_they_need(tmp_path: Path) -> 
     rows = select(a_draft(), rate=0.10)
 
     write_csv(rows, path)
-    with path.open(encoding=ENCODING, newline="") as handle:
-        read_back = list(csv.DictReader(handle))
+    read_back = data_rows(path)
 
     assert list(read_back[0]) == list(COLUMNS)
     assert all(row["verdict"] == "" and row["comment"] == "" for row in read_back)
@@ -323,3 +330,37 @@ def test_the_csv_lands_beside_the_draft_by_default(
     review_export.main([str(draft)])
 
     assert (tmp_path / "zh-HSK1.review.csv").exists()
+
+
+# ------------------------------------------- the sheet explains itself (D-117)
+
+
+def test_the_sheet_tells_the_reviewer_what_the_three_verdicts_mean(
+    tmp_path: Path,
+) -> None:
+    """'awkward' is the judgement the whole exercise exists for, and a reviewer
+    who is not told what it means rounds it to 'ok'."""
+    path = tmp_path / "review.csv"
+
+    write_csv(select(a_draft(), rate=0.10), path)
+    text = path.read_text(encoding=ENCODING)
+
+    for verdict in VERDICTS:
+        assert verdict in text
+    assert "not a softer" in text
+
+
+def test_the_notes_are_not_mistaken_for_rows_to_judge(tmp_path: Path) -> None:
+    path = tmp_path / "review.csv"
+
+    write_csv(select(a_draft(), rate=0.10), path)
+
+    assert all(not row["id"].startswith("#") for row in data_rows(path))
+
+
+def test_the_covering_note_still_summarises_for_the_sender(tmp_path: Path) -> None:
+    """Two audiences: the sheet instructs the reviewer, this tells whoever is
+    forwarding it what they are passing on."""
+    rows = select(a_draft(), rate=0.10)
+
+    assert "row(s) to review" in instructions(tmp_path / "review.csv", rows)

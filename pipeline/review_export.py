@@ -175,9 +175,59 @@ def select(draft: Draft, *, rate: float, seed: int | None = None) -> list[Row]:
     return [row for row in everything if row.id in chosen]
 
 
+#: Marks a row that is guidance rather than work, so a reviewer who sorts the
+#: sheet cannot turn one into the other.
+COMMENT: Final = "#"
+
+
+def preamble(rows: Sequence[Row]) -> list[str]:
+    """What a reviewer needs, inside the file they are sent.
+
+    This used to be printed for whoever ran the command instead, on the
+    grounds that a CSV with a preamble opens badly. It does open: what breaks
+    is reading it back assuming the header is line one, and that is fixed by
+    looking for the header. Printing it reaches the sender and nobody after —
+    the file is then forwarded, and the instructions are not in it.
+
+    English, because the pipeline writing Khmer instructions would make them
+    the one piece of unreviewed Khmer in a handoff whose entire purpose is
+    review.
+    """
+    by_kind = {stratum: sum(1 for row in rows if row.kind == stratum) for stratum in STRATA}
+    # Joined without commas so the line needs no CSV quoting and reads the same
+    # in a spreadsheet and in a text editor.
+    counts = "  ".join(f"{kind} {count}" for kind, count in by_kind.items() if count)
+    return [
+        f"{COMMENT} {len(rows)} items of machine-written course material to judge.",
+        f"{COMMENT} Breakdown — {counts}",
+        f"{COMMENT} You are the quality floor for this text. Nothing else checks",
+        f"{COMMENT}   whether it reads like Khmer a person would actually write.",
+        f"{COMMENT}",
+        f"{COMMENT} Fill in TWO columns and change nothing else:",
+        f"{COMMENT}   'verdict'  — one of: " + " / ".join(VERDICTS),
+        f"{COMMENT}       ok       = a Khmer speaker would say or write this",
+        f"{COMMENT}       awkward  = understandable but nobody would put it this way",
+        f"{COMMENT}       wrong    = mistaken or confusing or not Khmer at all",
+        f"{COMMENT}   'comment'  — whenever the verdict is NOT ok write what it",
+        f"{COMMENT}       should say instead. A verdict without a correction tells",
+        f"{COMMENT}       us something is wrong but not how to fix it.",
+        f"{COMMENT}",
+        f"{COMMENT} 'awkward' is not a softer 'wrong'. It is the judgement we cannot",
+        f"{COMMENT}   make without you. Please use it rather than rounding up to ok.",
+        f"{COMMENT} 'id' is how your answers are matched back. Leave it exactly as is.",
+        f"{COMMENT} 'chinese' and 'pinyin' are context only. Judge the Khmer.",
+        f"{COMMENT} A half-finished sheet is useful. Send it back as it is.",
+        f"{COMMENT} Save as CSV with UTF-8 encoding. Do not save as .xlsx.",
+        f"{COMMENT} Lines starting with {COMMENT} are these notes; they are ignored.",
+    ]
+
+
 def write_csv(rows: Sequence[Row], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding=ENCODING, newline="") as handle:
+        notes = csv.writer(handle)
+        for line in preamble(rows):
+            notes.writerow([line])
         writer = csv.DictWriter(handle, fieldnames=COLUMNS)
         writer.writeheader()
         for row in rows:
@@ -185,10 +235,11 @@ def write_csv(rows: Sequence[Row], path: Path) -> None:
 
 
 def instructions(path: Path, rows: Sequence[Row]) -> str:
-    """What to say when sending the file. Printed, not written into the CSV.
+    """A summary for whoever is sending the file.
 
-    A CSV with a preamble is a CSV that no spreadsheet opens correctly, so the
-    guidance goes to whoever is sending the file rather than into the file.
+    The guidance a reviewer needs is in the sheet itself (see ``preamble``);
+    this is the covering note, so the sender knows what they are passing on
+    and roughly how much of it there is.
     """
     by_kind = {stratum: sum(1 for row in rows if row.kind == stratum) for stratum in STRATA}
     counts = ", ".join(f"{kind}: {count}" for kind, count in by_kind.items() if count)

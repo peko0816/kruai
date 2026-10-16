@@ -62,8 +62,11 @@ def catalogue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
 
 
 def read(path: Path) -> list[dict[str, str]]:
+    """The data rows, past the preamble — the same way a spreadsheet shows them."""
     with path.open(encoding=ENCODING, newline="") as handle:
-        return list(csv.DictReader(handle))
+        lines = [row for row in csv.reader(handle) if not (row and row[0].startswith("#"))]
+    header, *body = lines
+    return [dict(zip(header, row, strict=False)) for row in body]
 
 
 # ------------------------------------------------------------------- export
@@ -111,6 +114,56 @@ def test_the_file_opens_as_utf8_in_a_spreadsheet(catalogue: Path, tmp_path: Path
 
     assert path.read_bytes().startswith(b"\xef\xbb\xbf")
     assert list(read(path)[0]) == list(COLUMNS)
+
+
+# ------------------------------------------------- the sheet explains itself
+#
+# The instructions used to be printed by `make i18n-export`, which reaches
+# whoever ran the command and nobody after that: the file is emailed on, and
+# the guidance is not in it.
+
+
+def test_the_sheet_carries_its_own_instructions(catalogue: Path, tmp_path: Path) -> None:
+    path = tmp_path / "km.todo.csv"
+
+    write_csv(rows_for("km"), path, locale="km")
+    text = path.read_text(encoding=ENCODING)
+
+    assert "'translation'" in text
+    assert "curly braces" in text  # the parameter rule, which is the dangerous one
+    assert "'km'" in text
+
+
+def test_the_notes_do_not_become_translations(catalogue: Path, tmp_path: Path) -> None:
+    """They are rows in the same file; read back naively they are work."""
+    path = tmp_path / "km.todo.csv"
+    write_csv(rows_for("km"), path)
+
+    assert all(not key.startswith("#") for key in i18n_handoff.read_csv(path))
+
+
+def test_a_sorted_sheet_still_reads(catalogue: Path, tmp_path: Path) -> None:
+    """A translator who sorts by any column scatters the notes into the data,
+    so they are recognised by their marker and not by where they sit."""
+    path = tmp_path / "km.todo.csv"
+    write_csv(rows_for("km"), path)
+    with path.open(encoding=ENCODING, newline="") as handle:
+        lines = list(csv.reader(handle))
+    header = next(row for row in lines if row and row[0] == "key")
+    shuffled = [header, *sorted((r for r in lines if r is not header), key=lambda r: r[0])]
+    with path.open("w", encoding=ENCODING, newline="") as handle:
+        csv.writer(handle).writerows(shuffled)
+
+    assert set(i18n_handoff.read_csv(path)) == {"bot.quota_exhausted", "bot.welcome"}
+
+
+def test_a_sheet_whose_notes_were_deleted_still_reads(catalogue: Path, tmp_path: Path) -> None:
+    """Some people tidy. The header is found, not assumed to be line one."""
+    path = tmp_path / "km.todo.csv"
+    write_csv(rows_for("km"), path)
+    fill(path, {"bot.welcome": KM}, keep_notes=False)
+
+    assert i18n_handoff.read_csv(path)["bot.welcome"] == KM
 
 
 # -------------------------------------------------------------------- apply
@@ -175,14 +228,24 @@ def test_the_chinese_catalogue_is_checked_for_chinese(catalogue: Path) -> None:
 # --------------------------------------------------------------- round trip
 
 
-def fill(path: Path, translations: dict[str, str]) -> Path:
-    rows = read(path)
-    for row in rows:
-        row["translation"] = translations.get(row["key"], "")
+def fill(path: Path, translations: dict[str, str], *, keep_notes: bool = True) -> Path:
+    """Fill the sheet in, the way a translator's spreadsheet saves it back."""
+    with path.open(encoding=ENCODING, newline="") as handle:
+        lines = list(csv.reader(handle))
+    notes = [row for row in lines if row and row[0].startswith("#")]
+    header = next(row for row in lines if row and row[0] == "key")
+    body = lines[lines.index(header) + 1 :]
     with path.open("w", encoding=ENCODING, newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+        writer = csv.writer(handle)
+        if keep_notes:
+            writer.writerows(notes)
+        writer.writerow(header)
+        for row in body:
+            if row and row[0].startswith("#"):
+                continue
+            cells = dict(zip(header, row, strict=False))
+            cells["translation"] = translations.get(cells["key"], "")
+            writer.writerow([cells.get(column, "") for column in header])
     return path
 
 

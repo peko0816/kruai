@@ -104,13 +104,50 @@ def rows_for(locale: str, *, everything: bool = False) -> list[Row]:
     ]
 
 
-def write_csv(rows: Iterable[Row], path: Path) -> int:
+#: Marks a row that is guidance rather than work. Rows are skipped on the way
+#: back in by this, not by position: a translator who sorts the sheet by any
+#: column scatters the preamble into the data, and that must not break the
+#: merge or silently become a translation.
+COMMENT: Final = "#"
+
+
+def preamble(locale: str, count: int) -> list[str]:
+    """What the person filling the sheet needs, inside the sheet.
+
+    It used to be printed by `make i18n-export` instead, which reaches whoever
+    ran the command and nobody after that — the file is then emailed on, and
+    the instructions are not in it. In English because that is the language
+    REAL_ENVIRONMENT asks a translator for; Khmer guidance written by this
+    pipeline would be the one piece of unreviewed Khmer in the whole handoff.
+    """
+    return [
+        f"{COMMENT} {count} user-facing strings for a '{locale}' translator.",
+        f"{COMMENT} Fill in the LAST column — 'translation'. Change nothing else.",
+        f"{COMMENT} 'key' is how your work is matched back — leave it exactly as it is.",
+        f"{COMMENT} Any {{word}} in curly braces is a value the app fills in at runtime.",
+        f"{COMMENT}   Keep every one of them spelled exactly the same — otherwise",
+        f"{COMMENT}   the app crashes for users in this language only. You may",
+        f"{COMMENT}   move them to wherever the sentence needs them.",
+        f"{COMMENT} 'used_at' says where the string appears — so you can tell a button",
+        f"{COMMENT}   from a sentence. 'english' is the original.",
+        f"{COMMENT} Leave a row blank if you are unsure. A half-filled sheet is fine",
+        f"{COMMENT}   and can be sent back as it is.",
+        f"{COMMENT} Save as CSV with UTF-8 encoding. Do not save as .xlsx.",
+        f"{COMMENT} Lines starting with {COMMENT} are these notes; they are ignored.",
+    ]
+
+
+def write_csv(rows: Iterable[Row], path: Path, *, locale: str = "km") -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
+    body = list(rows)
     written = 0
     with path.open("w", encoding=ENCODING, newline="") as handle:
+        notes = csv.writer(handle)
+        for line in preamble(locale, len(body)):
+            notes.writerow([line])
         writer = csv.DictWriter(handle, fieldnames=COLUMNS)
         writer.writeheader()
-        for row in rows:
+        for row in body:
             writer.writerow(
                 {
                     "key": row.key,
@@ -178,17 +215,39 @@ def check_translations(
 
 
 def read_csv(path: Path) -> dict[str, str]:
+    """Read a filled sheet back, past whatever the preamble has become.
+
+    The header is found rather than assumed to be line one, and note rows are
+    recognised by their leading ``#`` rather than by where they sit, because a
+    sheet comes back sorted, re-saved and occasionally with rows dragged about.
+    """
     with path.open(encoding=ENCODING, newline="") as handle:
-        reader = csv.DictReader(handle)
-        if reader.fieldnames is None or "key" not in reader.fieldnames:
-            raise ValueError(f"{path} has no 'key' column; is it the exported sheet?")
-        if "translation" not in reader.fieldnames:
-            raise ValueError(f"{path} has no 'translation' column")
-        return {
-            (row.get("key") or "").strip(): (row.get("translation") or "")
-            for row in reader
-            if (row.get("key") or "").strip()
-        }
+        rows = list(csv.reader(handle))
+
+    header: list[str] | None = None
+    body: list[list[str]] = []
+    for row in rows:
+        if header is None:
+            if row and row[0].strip() == COLUMNS[0]:
+                header = [cell.strip() for cell in row]
+            continue
+        body.append(row)
+
+    if header is None:
+        raise ValueError(f"{path} has no 'key' column; is it the exported sheet?")
+    if "translation" not in header:
+        raise ValueError(f"{path} has no 'translation' column")
+
+    key_at, translation_at = header.index("key"), header.index("translation")
+    filled: dict[str, str] = {}
+    for row in body:
+        if len(row) <= key_at:
+            continue
+        key = row[key_at].strip()
+        if not key or key.startswith(COMMENT):
+            continue
+        filled[key] = row[translation_at] if len(row) > translation_at else ""
+    return filled
 
 
 def apply(translations: dict[str, str], *, locale: str) -> int:
@@ -229,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "export":
         rows = rows_for(arguments.locale, everything=arguments.all)
         destination = arguments.out or i18n.LOCALES_DIR / f"{arguments.locale}.todo.csv"
-        count = write_csv(rows, destination)
+        count = write_csv(rows, destination, locale=arguments.locale)
         print(f"{destination}: {count} string(s) for a {arguments.locale} translator")
         print("Fill in the 'translation' column only. Keep every {parameter} exactly as it is.")
         return 0
