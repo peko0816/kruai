@@ -26,7 +26,7 @@
   "bot.score_passed": "{score}/100 — 不错。继续。",
   "bot.scoring_unavailable": "评分目前不可用。请重新录制那段语音。",
   "bot.status": "计划：{plan}。今日尝试：{used}{limit_suffix}。",
-  "bot.status_limit_suffix": "/ {limit}",
+  "bot.status_limit_suffix": "/{limit}",
   "bot.status_unlimited": "",
   "bot.welcome": "KruAI — 中文口语练习。发送 /learn 开始课程。"
 }
