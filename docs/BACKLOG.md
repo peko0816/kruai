@@ -17,15 +17,25 @@
 **全项目 37 / 52。到 M2（C 端可交付测试）37 / 41。**
 （分母从 50 / 39 变为 52 / 41：B7 与 E10 是计划外但已交付的条目，记进来而不是记在脚注里。）
 
-挡在 M2 前面的仍是三样，但第一样已经走了一多半：
+挡在 M2 前面的三样里，两样已经不挡了：
 
-- **HSK1 的真实内容** —— LLM key 已拿到，48 个 concept 全部生成并经 8 条规则校验，
-  违规从 278 降到 78（修复轮 D-110）。剩下的 78 条已逐条给出替换建议，
-  待人工确认后批量应用。**真正缺的只剩母语者抽检**（`make review` 的 117 行）。
-- **ABA 凭据**（M0-3）—— 已裁决推迟，M2 以免费档交付（D-100 / D-101）
-- **km/zh 文案** —— 交接工具已就绪（`make i18n-export`，D-102），缺译者
+- ✅ **km/zh 界面文案**（2026-10-24）—— 两种语言各 29 条全部入库，
+  **`make i18n-strict` 通过**，M2 的上线闸门已开。
+- ✅ **ABA 凭据**（M0-3）—— 已裁决推迟，M2 以免费档交付（D-100 / D-101）
+- ⏳ **HSK1 的真实内容** —— 48 个 concept 已生成、校验零违规、打包入库。
+  第一轮母语者抽检回来了（117 行，合格率 75.2%），据此修了 141 处高棉语；
+  **但那次抽检因此失效**——它判过的内容有一部分已被替换，
+  旧的 75.2% 不能用来报 M1。第二轮抽检表（55 行）已交付，等回收。
 
-三样都不是代码任务，清单与顺序见 `docs/REAL_ENVIRONMENT.md`。
+真正剩下的只有抽检这一件，以及 M0 的三项（见下）。清单与顺序见 `docs/REAL_ENVIRONMENT.md`。
+
+> **第一轮抽检值得记一笔**：29 条非 ok 里，有一类是实施方的 bug——
+> 批量替换中文时只改了 `zh` 与 `pinyin`，没改 `km_gloss`，
+> 导致 55 格的高棉语在描述旧中文。四条校验规则全过，因为没有一条会问
+> 「高棉语还对得上吗」。它在库里躺了十一天，直到有人去读它（D-092 那一类）。
+> 另有 20 处把「吃」译成「日期」，母语者只抽到 2 处，
+> 是他写的 comment（「中文说的是吃饭，高棉语说的是日期」）让其余 18 处被扫出来——
+> 这是 D-121 把 comment 设为必填的直接依据。
 
 标记：
 - `[BLOCKED-M0]` —— 只实现接口与 Fake，真实实现留 `# TODO(M0-x)`
@@ -97,7 +107,7 @@
 | D4 | ✅ #21 #22 | `POST /lessons/{id}/complete` + `GET /review/queue` | C3 | 完课后 mastery 与队列正确更新 |
 | D5 | ✅ #23 #24 | `GET /me/entitlements` + `GET /admin/costs`（按 provider/用户/日聚合） | B6 C4 | 成本看板能看到 D3 产生的记账 |
 | D6 | ✅ #25 | Bot 会话状态机：讲解 → drill → vocab → Q&A → 完课；voice note 往返 | D2 D3 | 用 Fake Provider 在真实 Telegram 里走完一个单元 |
-| D7 | ✅ #26 #47 | i18n 框架 + `locales/{km,zh,en}.json`；CI 检查 km 无占位符 | A3 | 内联字符串检查通过 |
+| D7 | ✅ #26 #47 #59 #60 #63 | i18n 框架 + `locales/{km,zh,en}.json`；CI 检查 km 无占位符 | A3 | 内联字符串检查通过 |
 | D8a | ✅ #27 #28 #30 #46 | 付费墙 + 下单收单：Free/Basic 限额生效；`POST /payments/checkout` + `POST /payments/webhook/{provider}`；`Money` 值对象与 `core/money.py` | B4 C4 | FakeProvider 下可完成一笔"支付"并开通订阅；验签失败拒绝开通；KHR（0 位小数）与 USD（2 位）都有单测 |
 | D8b | ✅ #29 | **订阅续费双路径**（ARCHITECTURE 3.4）：`renewal_mode` 状态机、grace 期、auto 扣款定时任务 + 重试、manual 提醒定时任务 + 防重复 | D8a | 两条路径各有集成测试；FakeProvider 可分别模拟 `supports_recurring` 为真/假；grace 到期正确降级 |
 | D9 | ⏸ M0-3（接口与契约已就位 #31） | `[BLOCKED-M0]` ABA PayWay 真实 adapter（含 `HASH_FIELD_ORDER` 核对） | D8a + M0-3 | 真实小额支付 + 回调验签通过 |
@@ -129,11 +139,11 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 |---|---|---|---|---|
 | E1 | ✅ #37 | seed YAML schema 定义 + 校验器；`pipeline/seed/zh-hsk3.0/` 目录结构 | A1 | 非法 seed 被拒并指出具体字段 |
 | E2 | ✅ #38 #40 | HSK1 concept 骨架录入（来自公开大纲，含 `hskk_task_types`） | E1 | HSK1 全部 concept 有 seed |
-| E3 | ✅ #39 #40 #49 #50 #51 | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
-| E4 | ✅ #41 #50 #51 #52 #53 | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
-| E5 | ✅ #42 #53 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
-| E6 | ✅ #43 | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
-| E7 | ✅ #44 | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
+| E3 | ✅ #39 #40 #49 #50 #51 #56 | `generate.py`：调 `llm.batch_complete`，产出目标句/替换项/对话任务/高棉语解释/拼音声调 | B3 E1 | FakeLLM 下产出结构合法 |
+| E4 | ✅ #41 #50 #51 #52 #53 #61 | `validate.py`：8 条规则全实现（词表越界、长度、拼音声调、高棉语区段、concept 覆盖、hskk 非空、MinHash 去重、来源合规） | E3 | 每条规则一正例一反例，全部覆盖 |
+| E5 | ✅ #42 #53 #61 #62 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
+| E6 | ✅ #43 #56 | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
+| E7 | ✅ #44 #56 | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
 | E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
 | E10 | ✅ #52 | `repair.py`（stage 4b）：只重问 validate.py 驳回的 concept，违规原文进 prompt，逐 concept 保留违规更少的那一版。**计划外条目**：原计划 generate 与 validate 之间没有东西，一份有违规的 draft 只能整体重生成（D-110） | E3 E4 | 实测 186 → 78；绝不让某个 concept 变差 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
