@@ -233,10 +233,21 @@ def test_a_rendered_string_is_not_a_violation(source: str, tmp_path: Path) -> No
 # -------------------------------------------------------- the reported half
 
 
+# These three asserted the state of the repository — every key untranslated —
+# and went red the day the translations arrived, which is the one day they
+# should have stayed green. They assert the mechanism now, against a
+# catalogue built here, so finishing a language is not a test failure.
+
+
 def test_the_placeholder_count_is_reported_rather_than_failed() -> None:
-    """Every key is untranslated today. A gate that blocks unrelated work for
-    weeks is a gate somebody removes."""
-    findings = i18n_check.run()
+    """A gate that blocks unrelated work for weeks is a gate somebody removes:
+    pending translations are counted, not failed, until the launch gate."""
+    findings = i18n_check.run(
+        roots=(),
+        catalogues=catalogues(
+            km={"bot.welcome": "[[km:bot.welcome]]"}, en={"bot.welcome": "Hello"}
+        ),
+    )
 
     assert findings.placeholder_total > 0
     assert findings.blocking == []
@@ -244,23 +255,41 @@ def test_the_placeholder_count_is_reported_rather_than_failed() -> None:
 
 
 def test_the_launch_gate_refuses_while_translations_are_missing() -> None:
-    findings = i18n_check.run()
+    findings = i18n_check.run(
+        roots=(),
+        catalogues=catalogues(
+            km={"bot.welcome": "[[km:bot.welcome]]"}, en={"bot.welcome": "Hello"}
+        ),
+    )
 
     assert i18n_check.report(findings, strict=True) == 1
 
 
-def test_english_is_the_one_locale_that_is_finished() -> None:
+def test_the_launch_gate_passes_once_nothing_is_pending() -> None:
+    """The other half, which nothing covered: km and zh are complete now, and
+    a gate that cannot be satisfied is not a gate."""
+    findings = i18n_check.run(
+        roots=(),
+        catalogues=catalogues(km={"bot.welcome": "សួស្ដី"}, en={"bot.welcome": "Hello"}),
+    )
+
+    assert findings.placeholder_total == 0
+    assert i18n_check.report(findings, strict=True) == 0
+
+
+def test_the_repository_is_fully_translated() -> None:
+    """The state assertion, kept but turned the right way round: every locale
+    is finished, and going backwards should fail."""
     findings = i18n_check.run()
 
-    assert findings.placeholders_by_locale["en"] == set()
-    assert findings.placeholders_by_locale["km"], (
-        "km is placeholders until a native speaker writes it"
-    )
+    assert findings.placeholder_total == 0, "a locale lost translations"
 
 
 def test_the_command_line_runs_both_ways() -> None:
+    """Both exit zero now that every locale is finished; --strict is what
+    would fail if one went backwards, which the run above asserts."""
     assert i18n_check.main([]) == 0
-    assert i18n_check.main(["--strict"]) == 1
+    assert i18n_check.main(["--strict"]) == 0
 
 
 def test_the_checker_reads_both_the_bot_and_the_backend() -> None:

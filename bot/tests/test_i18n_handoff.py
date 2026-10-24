@@ -285,10 +285,11 @@ def test_something_that_is_not_the_exported_sheet_is_refused(
 # ------------------------------------------------- the repository as it stands
 
 
-def test_the_real_catalogue_can_be_handed_over_today() -> None:
-    """The reason this exists: 30 strings a native speaker can start on now,
-    with no dependency on generation, TTS or anything else being ready."""
-    assert len(rows_for("km")) == len(pending("km")) > 0
+def test_the_real_catalogue_exports_exactly_what_is_pending() -> None:
+    """Held the count above zero while the strings were waiting. They have
+    been written, so what it checks now is that the export and the pending
+    list agree — including when there is nothing left to hand over."""
+    assert len(rows_for("km")) == len(pending("km"))
 
 
 @pytest.mark.parametrize(
