@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair fixes review m0-scoring build import wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair fixes review m0-scoring m0-tts m0-tts-score build import wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -33,6 +33,7 @@ help:
 	@echo "  make repair     re-ask the concepts validate.py rejected (LLM; fake by default)"
 	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
 	@echo "  make m0-scoring  M0-1 verification (SCORING_PROVIDER; fake by default)"
+	@echo "  make m0-tts      M0-2 blind listening test (export / m0-tts-score)"
 	@echo "  make review     export the native-speaker review sample (DRAFT=<path>)"
 	@echo "  make build      freeze a draft into a pack with its audio (DRAFT=<path>)"
 	@echo "  make import     import a pack into the database (PACK=<path>)"
@@ -152,6 +153,19 @@ M0_MANIFEST ?= $(CURDIR)/m0/samples/manifest.csv
 
 m0-scoring:
 	$(ROOT_RUN) -m m0.scoring_check $(M0_MANIFEST) $(ARGS)
+
+# M0-2 (item 5): a blind listening test. Export synthesises one clip per
+# passage per vendor under names that do not say who made them; score
+# un-blinds the filled sheets. The key file is written outside the clip
+# folder so sending the folder cannot send the key with it.
+M0_CORPUS ?= $(CURDIR)/m0/samples/khmer-corpus.csv
+M0_VENDORS ?= fake
+
+m0-tts:
+	$(ROOT_RUN) -m m0.tts_blind export $(M0_CORPUS) --providers $(M0_VENDORS) $(ARGS)
+
+m0-tts-score:
+	$(ROOT_RUN) -m m0.tts_blind score $(SHEETS) $(ARGS)
 
 # Stage [4b]: re-ask only the concepts validate.py rejected, with their own
 # violations in the prompt, keeping whichever version of each is better.
