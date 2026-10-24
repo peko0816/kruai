@@ -6,7 +6,7 @@ BACKEND := backend
 UV := uv
 UV_RUN := $(UV) run --directory $(BACKEND)
 
-.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair fixes review build import wordlist clean
+.PHONY: help sync check lint fmt fmt-check type test selfcheck migrate run bot jobs i18n i18n-strict i18n-export i18n-apply seed seed-strict generate validate repair fixes review m0-scoring build import wordlist clean
 
 help:
 	@echo "KruAI make targets:"
@@ -32,6 +32,7 @@ help:
 	@echo "  make fixes      the violations as a sheet to work through"
 	@echo "  make repair     re-ask the concepts validate.py rejected (LLM; fake by default)"
 	@echo "  make validate   run the eight content rules over a draft (DRAFT=<path>)"
+	@echo "  make m0-scoring  M0-1 verification (SCORING_PROVIDER; fake by default)"
 	@echo "  make review     export the native-speaker review sample (DRAFT=<path>)"
 	@echo "  make build      freeze a draft into a pack with its audio (DRAFT=<path>)"
 	@echo "  make import     import a pack into the database (PACK=<path>)"
@@ -43,13 +44,13 @@ sync:
 check: lint fmt-check type test
 
 lint:
-	$(UV_RUN) ruff check . ../bot ../pipeline
+	$(UV_RUN) ruff check . ../bot ../pipeline ../m0
 
 fmt:
-	$(UV_RUN) ruff format . ../bot ../pipeline
+	$(UV_RUN) ruff format . ../bot ../pipeline ../m0
 
 fmt-check:
-	$(UV_RUN) ruff format --check . ../bot ../pipeline
+	$(UV_RUN) ruff format --check . ../bot ../pipeline ../m0
 
 type:
 	$(UV_RUN) mypy
@@ -143,6 +144,14 @@ FIXES ?= $(CURDIR)/pipeline/packs/zh-HSK1.fixes.csv
 
 fixes:
 	$(ROOT_RUN) -m pipeline.validate $(DRAFT) --csv $(FIXES)
+
+# M0-1 (docs/REAL_ENVIRONMENT.md item 3): can a threshold separate a good
+# speaker from a real beginner? Runs on FakeScorer for free, which is how it
+# was written; a billed provider needs ARGS="--confirm-spend".
+M0_MANIFEST ?= $(CURDIR)/m0/samples/manifest.csv
+
+m0-scoring:
+	$(ROOT_RUN) -m m0.scoring_check $(M0_MANIFEST) $(ARGS)
 
 # Stage [4b]: re-ask only the concepts validate.py rejected, with their own
 # violations in the prompt, keeping whichever version of each is better.
