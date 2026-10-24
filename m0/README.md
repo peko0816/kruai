@@ -21,7 +21,12 @@ bad-01.wav,我要水。,bad
 | `reference_text` | 这条录音**本该说的**那句中文 |
 | `group` | `good` 或 `bad` |
 
-录音格式 wav / mp3 / m4a 均可，后缀会被当作格式提示传给 provider。
+录音格式：**16 kHz、单声道、16-bit 的 wav**（或 ogg/opus），每条不超过 60 秒——这是 Azure 端点的要求。
+手机录音通常是 44.1 / 48 kHz，脚本会在**发请求之前**拒掉并给出转换命令，不花钱：
+
+```bash
+ffmpeg -i 原始录音.m4a -ar 16000 -ac 1 -sample_fmt s16 good-01.wav
+```
 
 ### 两组人怎么找
 
@@ -45,6 +50,9 @@ make m0-scoring M0_MANIFEST=/path/to/manifest.csv
 SCORING_PROVIDER=azure make m0-scoring \
     M0_MANIFEST=/path/to/manifest.csv ARGS="--confirm-spend"
 ```
+
+计费运行前要先 `docker compose up -d` 并 `make migrate`：**每一次调用都写进 `cost_ledger`**
+（CLAUDE.md 第 8 节），连不上账本就**一个请求都不发**，直接退出码 2。
 
 ## 它判什么
 
@@ -142,6 +150,9 @@ make m0-tts \
 make m0-tts-score SHEETS="r1.csv r2.csv"
 ```
 
+第一步和 M0-1 一样要先起数据库（`docker compose up -d` + `make migrate`），理由相同：
+每条合成都记账，账本不可写就不开始。
+
 第一步产出 `m0/tts-blind/`（音频 + `scoring-sheet.csv`）和 `m0/tts-blind-key.csv`。
 **只发前者。**
 
@@ -168,3 +179,22 @@ make m0-tts-score SHEETS="r1.csv r2.csv"
 
 产出 `docs/tts-decision.md`，含**逻辑音色 → 厂商音色**的映射表。
 E8 读那张表；表没填，`TTS_PROVIDER` 就没有东西可以解析逻辑音色。
+
+---
+
+# Azure 验证实现（`m0/azure/`）
+
+两个脚本里 `azure` 这个名字解析到 `m0/azure/`，**不在 `app/services/`**（D-126）：
+CLAUDE.md 第 3 节在 M0 出结论前不允许真实 provider 实现，而 M0 要出结论就得调 Azure。
+`fake` 照旧走应用自己的 registry，行为与运行时完全一致。
+
+| | |
+|---|---|
+| 资源 | `ai-tutor-speech`，区域 `eastasia`，免费档 F0 |
+| 走的接口 | REST（不是 Speech SDK）：TTS 用 `cognitiveservices/v1` + SSML；评测用短音频识别端点 + `Pronunciation-Assessment` 头 |
+| 限流 | F0 每分钟约 20 次。遇到 429 按 `Retry-After` 等，最多试 3 次 |
+| 成本 | F0 实际不收费；记账按标价估：TTS $15／百万字符（逐条向下取整）、评测按 $2／小时上限（逐条向上取整） |
+| **没验证过的** | 评测返回的 JSON 结构只对着微软文档写过，两种文档写法都能读；读不懂时报 `scoring.malformed_response` 并把原文留在 `raw`。**第一次真实调用要有人盯着** |
+
+M0 出结论后，留下的那个按 E8 / E9 搬进 `app/services/`，各加一行 registry；这个目录随之删除。
+
