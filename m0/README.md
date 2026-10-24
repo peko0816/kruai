@@ -76,16 +76,26 @@ SCORING_PROVIDER=azure make m0-scoring \
 
 # M0-2: 高棉语音色选型
 
-回答：**三家 TTS 里，哪一家的高棉语听起来像高棉语。**
+回答：**Azure 的高棉语听起来像不像高棉语，以及两个声音各用在哪。**
 
-文档上比不出来——要紧的是高棉人听着自不自然，而三家都不会如实说自己。
-所以这是一次**盲听测试**，而"盲"这件事必须做出来而不是承诺出来：
+原计划是三家对比。逐家查了官方声音列表之后（D-125）：
+
+| 厂商 | 高棉语 TTS |
+|---|---|
+| **Azure** | ✅ `km-KH-SreymomNeural`（女声）、`km-KH-PisethNeural`（男声）|
+| Google Cloud TTS | ❌ 语言表从 Kannada 直接跳到 Korean |
+| ElevenLabs | ❌ 所有模型的语言表都从 Kazakh 跳到 Kirghiz |
+
+所以比较的是**声音**：同一家厂商，指定不同的厂商音色，各合成一遍。
+脚本的比较单位叫「候选」，写成 `厂商:声音`；只写厂商名也可以，比较厂商时照常用。
+
+"盲"必须做出来而不是承诺出来：
 
 | 做法 | 为什么 |
 |---|---|
-| 文件名是摘要，不含厂商 | 叫 `azure-p01.mp3` 就不用做测试了 |
+| 文件名是摘要，不含厂商也不含声音名 | 叫 `sreymom-p01.mp3` 就不用做测试了 |
 | 还原用的 key 写在**音频目录之外** | 这样"把文件夹发出去"不可能连 key 一起发 |
-| 每一段的三个 clip **各自打乱** | 固定顺序到第三段就不盲了——听者会发现第一个永远是同一把嗓子，从此在给厂商打分而不是给音频打分 |
+| 每一段的几个 clip **各自打乱** | 固定顺序到第三段就不盲了——听者会发现第一个永远是同一把嗓子 |
 | 打乱是按段落种子的 | 两个人导出同一批素材得到同一份表，一个分数能追回它对应的那条 |
 
 ## 素材
@@ -112,7 +122,7 @@ SCORING_PROVIDER=azure make m0-scoring \
 
 这些句子多数是从英文译成高棉语的，有些措辞可能带翻译腔。
 **请评审给"嗓子"打分，不给"句子"打分**：句子本身别扭不该扣 `naturalness`。
-三家合成的是同一批句子，所以翻译腔会同等地影响所有厂商，**相对比较仍然成立**；
+每个声音合成的都是同一批句子，所以翻译腔会同等地影响所有候选，**相对比较仍然成立**；
 但它可能整体压低绝对分数，所以 ≥4 这条线要结合 `comment` 看。
 
 ### 为什么不用 MoEYS OER
@@ -124,8 +134,9 @@ SCORING_PROVIDER=azure make m0-scoring \
 
 ```bash
 # 一、合成 + 出盲听表
-make m0-tts M0_CORPUS=/path/to/corpus.csv \
-    M0_VENDORS=azure,google,elevenlabs ARGS="--confirm-spend"
+make m0-tts \
+    M0_CANDIDATES=azure:km-KH-SreymomNeural,azure:km-KH-PisethNeural \
+    ARGS="--confirm-spend"
 
 # 二、两份以上填好的表回来之后
 make m0-tts-score SHEETS="r1.csv r2.csv"

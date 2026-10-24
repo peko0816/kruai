@@ -19,6 +19,7 @@ wrong (see the module docstring on base.py).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Final
 
 from app.services.tts.base import SynthesisResult, TTSProvider, Voice
@@ -91,6 +92,15 @@ class FakeTTS(TTSProvider):
     """Synthesises silence whose length tracks the text. No vendor, no codec."""
 
     name = "fake"
+
+    def __init__(self, voices: Mapping[Voice, str] | None = None) -> None:
+        """Accepts a voice mapping like any provider, and does not pretend to use it.
+
+        It is kept so a caller wiring a mapping through can be tested against
+        the fake, but it never reaches ``resolved_voice``: a vendor voice name
+        on silence is exactly the fabrication the docstring below rules out.
+        """
+        self.requested_voices: dict[Voice, str] = dict(voices or {})
 
     def available_voices(self) -> dict[Voice, str]:
         """Every logical voice, so pack builds never stall on a missing one.

@@ -18,6 +18,7 @@ from m0.tts_blind import (
     AXES,
     MIN_MEAN,
     MIN_REVIEWERS,
+    Candidate,
     Clip,
     CorpusError,
     Passage,
@@ -53,11 +54,11 @@ def settings(**overrides: Any) -> Settings:
     return Settings(_env_file=None, **{**base, **overrides})
 
 
-def clip(passage_id: str, provider: str) -> Clip:
+def clip(passage_id: str, candidate: str) -> Clip:
     return Clip(
         passage=Passage(id=passage_id, text=KM, source="kh.moeys.oer"),
-        provider=provider,
-        resolved_voice=f"{provider}-km-1",
+        candidate=Candidate.parse(candidate),
+        resolved_voice=f"{candidate}-km-1",
         audio=b"ID3",
         audio_format="mp3",
         cost_usd_cents=1,
@@ -139,7 +140,7 @@ def test_the_vendor_order_is_not_the_same_in_every_group() -> None:
 
     order = shuffled(clips, seed="m0-2")
     per_passage = {
-        p: tuple(c.provider for c in order if c.passage.id == p)
+        p: tuple(c.candidate.label for c in order if c.passage.id == p)
         for p in {c.passage.id for c in clips}
     }
 
@@ -209,17 +210,23 @@ def sheet(
     return [
         {
             "clip": row["clip"],
-            **dict(zip(AXES, map(str, marks[row["provider"]][:2]), strict=True)),
-            "fatal_error": marks[row["provider"]][2],
+            **dict(zip(AXES, map(str, marks[row["candidate"]][:2]), strict=True)),
+            "fatal_error": marks[row["candidate"]][2],
         }
         for row in key
     ]
 
 
-def a_key(providers: tuple[str, ...]) -> list[dict[str, str]]:
+def a_key(candidates: tuple[str, ...]) -> list[dict[str, str]]:
     return [
-        {"clip": clip("p01", p).name, "passage": "p01", "provider": p, "resolved_voice": ""}
-        for p in providers
+        {
+            "clip": clip("p01", c).name,
+            "passage": "p01",
+            "candidate": c,
+            "provider": Candidate.parse(c).provider,
+            "resolved_voice": "",
+        }
+        for c in candidates
     ]
 
 
@@ -227,7 +234,7 @@ def test_scores_are_attributed_to_the_right_vendor() -> None:
     key = a_key(("azure", "google"))
     marks = {"azure": (5, 5, ""), "google": (2, 2, "")}
 
-    verdicts = {v.provider: v for v in tally(key, [sheet(marks, key), sheet(marks, key)])}
+    verdicts = {v.candidate: v for v in tally(key, [sheet(marks, key), sheet(marks, key)])}
 
     assert verdicts["azure"].means["naturalness"] == 5.0
     assert verdicts["google"].means["naturalness"] == 2.0
@@ -298,7 +305,7 @@ def test_the_report_says_so_when_nothing_passes() -> None:
     """And says that the way out is a product decision, not a technical one."""
     text = as_markdown([Verdict("azure", dict.fromkeys(AXES, 2.0), fatal=0, reviewers=2)])
 
-    assert "No vendor passes" in text
+    assert "No candidate passes" in text
     assert "product decision" in text
 
 
@@ -323,7 +330,7 @@ def test_a_billed_vendor_needs_the_spend_flag(
     monkeypatch.setattr(module, "get_settings", settings)
     path = corpus(tmp_path, f"id,khmer,source\np01,{KM},kh.moeys.oer\n")
 
-    assert main(["export", str(path), "--providers", "azure,google"]) == 2
+    assert main(["export", str(path), "--candidates", "azure:a,azure:b"]) == 2
     assert "bill per character" in capsys.readouterr().err
 
 
@@ -368,3 +375,100 @@ def test_the_clips_and_the_key_are_written_to_different_places(
 
     assert key.parent != out
     assert not any(p.name == key.name for p in out.iterdir())
+
+
+# ------------------------------------- comparing voices of one vendor (D-125)
+#
+# Of the three vendors planned, only Azure has Khmer. The question became which
+# of its voices, and a candidate is a provider pinned to one of them.
+
+
+def test_a_candidate_parses_a_pinned_voice() -> None:
+    c = Candidate.parse("azure:km-KH-SreymomNeural")
+
+    assert (c.provider, c.voice) == ("azure", "km-KH-SreymomNeural")
+    assert c.label == "azure:km-KH-SreymomNeural"
+
+
+def test_a_bare_provider_is_still_a_candidate() -> None:
+    """Comparing vendors still works the way it did."""
+    assert Candidate.parse("fake").label == "fake"
+
+
+def test_two_voices_of_one_vendor_get_different_clip_names() -> None:
+    """Named by provider alone, the second voice would overwrite the first."""
+    assert (
+        clip("p01", "azure:km-KH-SreymomNeural").name
+        != clip("p01", "azure:km-KH-PisethNeural").name
+    )
+
+
+def test_the_pinned_voice_reaches_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Through the registry every runtime caller uses, so the test hears what a
+    pack build would produce rather than a voice reached some other way."""
+    import asyncio
+
+    from app.services.tts import registry
+    from app.services.tts.base import Voice
+    from app.services.tts.fake import FakeTTS
+    from m0.tts_blind import synthesise
+
+    built: list[FakeTTS] = []
+
+    def spy(**kwargs: Any) -> FakeTTS:
+        provider = FakeTTS(**kwargs)
+        built.append(provider)
+        return provider
+
+    monkeypatch.setitem(registry._FACTORIES, "spy", spy)
+    passages = [Passage(id="p01", text=KM, source="corpus.tatoeba")]
+
+    asyncio.run(
+        synthesise(
+            passages,
+            candidates=[Candidate.parse("spy:km-KH-PisethNeural")],
+            settings=settings(),
+        )
+    )
+
+    assert built[0].requested_voices == {Voice.KM_NARRATOR: "km-KH-PisethNeural"}
+
+
+def test_the_fake_does_not_claim_a_vendor_voice() -> None:
+    """ARCHITECTURE 3.2: a vendor voice name on silence would survive into a
+    pack that looks real. The fake accepts the mapping and still says fake."""
+    import asyncio
+
+    from app.services.tts.base import Voice
+    from app.services.tts.fake import FakeTTS
+
+    tts = FakeTTS(voices={Voice.KM_NARRATOR: "km-KH-SreymomNeural"})
+    result = asyncio.run(tts.synthesize(KM, voice=Voice.KM_NARRATOR))
+
+    assert result.resolved_voice == "fake"
+
+
+def test_the_winning_voice_fills_the_narrator_mapping() -> None:
+    """E8 reads that table; the decision should arrive already written into it."""
+    text = as_markdown(
+        [
+            Verdict("azure:km-KH-SreymomNeural", dict.fromkeys(AXES, 4.6), fatal=0, reviewers=2),
+            Verdict("azure:km-KH-PisethNeural", dict.fromkeys(AXES, 4.1), fatal=0, reviewers=2),
+        ]
+    )
+
+    assert "| `km_narrator` | `km-KH-SreymomNeural` |" in text
+
+
+def test_two_billed_voices_are_still_one_spend_question(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two voices of one vendor is two runs over the corpus, so it is billed —
+    but the guard names the vendor once rather than once per voice."""
+    import m0.tts_blind as module
+
+    monkeypatch.setattr(module, "get_settings", settings)
+    path = corpus(tmp_path, f"id,khmer,source\np01,{KM},corpus.tatoeba\n")
+
+    assert main(["export", str(path), "--candidates", "azure:a,azure:b"]) == 2
+    assert "['azure']" in capsys.readouterr().err

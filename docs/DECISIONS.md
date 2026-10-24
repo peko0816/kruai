@@ -2928,3 +2928,38 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。语料是一个 CSV，换来源只需换文件。
 - 影响范围：`m0/samples/khmer-corpus.csv`（新增）、`m0/README.md`、
   `docs/REAL_ENVIRONMENT.md`、`docs/HANDOFF_SHEETS.md`。
+
+## D-125 只有 Azure 有高棉语 TTS；盲评改为比较声音
+
+- 日期：2026-10-24
+- 背景：REAL_ENVIRONMENT 第 5 项与 PRD 列了三家候选：Azure、Google Cloud TTS、ElevenLabs。
+  注册之前逐家对照**官方声音列表**核实是否支持高棉语（km-KH）。
+- **结果**：
+  | 厂商 | 高棉语 TTS | 依据 |
+  |---|---|---|
+  | Azure | ✅ `km-KH-SreymomNeural`（女）、`km-KH-PisethNeural`（男）| 微软语言支持页 TTS 表 |
+  | Google Cloud TTS | ❌ | 声音表从 Kannada 直接到 Korean |
+  | ElevenLabs | ❌ | v3 / v4 / v4 Turbo 的语言表都从 Kazakh 直接到 Kirghiz |
+- **一个容易误判的地方**：搜索 Google 和 ElevenLabs 都能搜到"Khmer"，
+  但那是它们的**语音识别**（speech-to-text）产品，方向相反。只看搜索结果会以为三家都支持。
+- 选择：
+  1. **只注册 Azure**，与 M0-1 共用同一个 Speech 资源。另外两家不注册。
+  2. **盲评的比较单位从「厂商」改为「候选」**：`厂商:厂商音色`，
+     例如 `azure:km-KH-SreymomNeural`。只写厂商名仍然有效。
+     盲化、打乱、计分的机制都没变，只是被打乱的单位变了。
+  3. **`tts.registry.build_tts` 增加可选的 `voices` 参数**，让同一厂商能以不同的
+     「逻辑音色 → 厂商音色」映射构造两次。这是 `base.py` 的 `available_voices()`
+     已经表达的概念，规范接口没有改动；不传参数时行为与原来完全一致。
+  4. **FakeTTS 接受这个参数但不使用它**，`resolved_voice` 仍然是 `"fake"`——
+     它的文档字符串（ARCHITECTURE 3.2）明确禁止在静音上标一个厂商音色名，
+     因为那会混进一个看起来是真的包里。
+- **风险：没有备选了**。Azure 若不达标，原计划里没有第二家能顶上。
+- **待项目所有者决定（第 3 节越界）**：两个 M0 验证脚本都通过 registry 取 provider，
+  而 registry 里**只有 Fake**，没有 Azure 实现——此前「拿到 key 当天出报告」的说法不成立。
+  写 Azure 实现属于第 3 节「现在不要做：任何 provider 的真实实现（M0 未出结论）」。
+  但 M0 要出结论就得调 Azure。提议：**验证用的 Azure 实现放在 `m0/` 下**，
+  只在 m0 脚本运行时注册进 registry，`app/services/` 保持只有 Fake；
+  M0 出结论后再按 E8 / E9 搬进 `app/services/`。
+- 回退成本：低。
+- 影响范围：`backend/app/services/tts/{registry,fake}.py`、`m0/tts_blind.py` 与测试、
+  `m0/README.md`、`docs/REAL_ENVIRONMENT.md`、`docs/HANDOFF_SHEETS.md`、`Makefile`。

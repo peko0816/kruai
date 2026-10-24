@@ -13,14 +13,19 @@ would be a silent config addition, which CLAUDE.md R3 rules out.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from app.core.config import Settings
 from app.services.provider_errors import ProviderConfigurationError
 from app.services.tts.base import TTSProvider, Voice
 from app.services.tts.fake import FakeTTS
 
-_FACTORIES: dict[str, Callable[[], TTSProvider]] = {
+#: A factory takes an optional voice mapping. ``available_voices()`` is how a
+#: provider says which vendor voice stands behind each logical one, and M0-2
+#: has to compare two vendor voices for the same logical voice — the same
+#: vendor, built twice with different mappings. Without this the only way to
+#: hear a second voice is a second vendor, and only one vendor has Khmer.
+_FACTORIES: dict[str, Callable[..., TTSProvider]] = {
     "fake": FakeTTS,
 }
 
@@ -29,8 +34,13 @@ def available_providers() -> tuple[str, ...]:
     return tuple(sorted(_FACTORIES))
 
 
-def build_tts(name: str) -> TTSProvider:
+def build_tts(name: str, *, voices: Mapping[Voice, str] | None = None) -> TTSProvider:
     """Instantiate one provider by name.
+
+    ``voices`` overrides which vendor voice a logical voice resolves to. Left
+    out, the provider uses its own default, which is what every runtime caller
+    wants; the override exists for M0-2, which compares voices rather than
+    vendors.
 
     Raises:
         ValueError: no such implementation — a typo in TTS_PROVIDER, or a vendor
@@ -41,7 +51,7 @@ def build_tts(name: str) -> TTSProvider:
         raise ProviderConfigurationError(
             f"unknown tts provider {name!r}; implemented: {list(available_providers())}"
         )
-    return factory()
+    return factory() if voices is None else factory(voices=dict(voices))
 
 
 def get_tts(voice: Voice, *, settings: Settings) -> TTSProvider:

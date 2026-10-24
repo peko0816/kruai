@@ -155,14 +155,14 @@ m0-scoring:
 	$(ROOT_RUN) -m m0.scoring_check $(M0_MANIFEST) $(ARGS)
 
 # M0-2 (item 5): a blind listening test. Export synthesises one clip per
-# passage per vendor under names that do not say who made them; score
+# passage per candidate voice under names that do not say which; score
 # un-blinds the filled sheets. The key file is written outside the clip
 # folder so sending the folder cannot send the key with it.
 M0_CORPUS ?= $(CURDIR)/m0/samples/khmer-corpus.csv
-M0_VENDORS ?= fake
+M0_CANDIDATES ?= fake
 
 m0-tts:
-	$(ROOT_RUN) -m m0.tts_blind export $(M0_CORPUS) --providers $(M0_VENDORS) $(ARGS)
+	$(ROOT_RUN) -m m0.tts_blind export $(M0_CORPUS) --candidates $(M0_CANDIDATES) $(ARGS)
 
 m0-tts-score:
 	$(ROOT_RUN) -m m0.tts_blind score $(SHEETS) $(ARGS)
