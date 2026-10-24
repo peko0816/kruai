@@ -44,8 +44,16 @@ from pathlib import Path
 from typing import Final
 
 from app.core.config import Settings, get_settings
-from app.services.tts.base import Voice
-from app.services.tts.registry import build_tts
+from app.services.provider_errors import ProviderConfigurationError
+from app.services.tts.base import TTSProvider, Voice
+from m0.providers import (
+    LEDGER_REF,
+    Ledger,
+    LedgerUnavailableError,
+    Unbilled,
+    build_tts,
+    open_ledger,
+)
 
 #: What a reviewer scores each clip on, 1-5. Two axes rather than one overall
 #: mark: a voice can be perfectly clear and still sound like a machine, and
@@ -173,29 +181,54 @@ def load_corpus(path: Path) -> list[Passage]:
     return passages
 
 
+def build_candidates(
+    candidates: Sequence[Candidate], *, settings: Settings
+) -> list[tuple[Candidate, TTSProvider]]:
+    """One provider per candidate, its pinned voice standing behind KM_NARRATOR.
+
+    Pure construction, no request: a missing key raises here.
+    """
+    return [
+        (
+            candidate,
+            build_tts(
+                candidate.provider,
+                settings=settings,
+                voices={Voice.KM_NARRATOR: candidate.voice} if candidate.voice else None,
+            ),
+        )
+        for candidate in candidates
+    ]
+
+
 async def synthesise(
-    passages: Sequence[Passage], *, candidates: Sequence[Candidate], settings: Settings
+    passages: Sequence[Passage],
+    *,
+    candidates: Sequence[Candidate],
+    settings: Settings,
+    ledger: Ledger | None = None,
 ) -> tuple[list[Clip], list[str]]:
     """One clip per passage per candidate. Failures are reported, not raised.
 
     A pinned candidate builds its provider with that voice standing behind
-    KM_NARRATOR, through the same registry every runtime caller uses — the
-    test listens to exactly what a pack build would produce, not to a voice
-    reached some other way.
+    KM_NARRATOR — the test listens to exactly what a pack build would
+    produce, not to a voice reached some other way. Every candidate is built
+    before the first request, so a missing key stops the run before anything
+    is billed. Every call is recorded in the ledger, failed ones included.
     """
+    ledger = ledger or Unbilled()
+    providers = build_candidates(candidates, settings=settings)
     clips: list[Clip] = []
     failures: list[str] = []
-    for candidate in candidates:
-        tts = build_tts(
-            candidate.provider,
-            voices={Voice.KM_NARRATOR: candidate.voice} if candidate.voice else None,
-        )
+    for candidate, tts in providers:
         for passage in passages:
-            result = await tts.synthesize(
-                passage.text,
-                voice=Voice.KM_NARRATOR,
-                speaking_rate=settings.tts_speaking_rate_km,
-            )
+            async with ledger.external_call(provider=tts.name, ref=LEDGER_REF) as entry:
+                result = await tts.synthesize(
+                    passage.text,
+                    voice=Voice.KM_NARRATOR,
+                    speaking_rate=settings.tts_speaking_rate_km,
+                )
+                entry.record(unit="calls", quantity=1, cost_usd_cents=result.cost_usd_cents)
             if not result.ok:
                 failures.append(f"{candidate.label}/{passage.id}: {result.error_code}")
                 continue
@@ -394,7 +427,22 @@ def _export(arguments: argparse.Namespace, settings: Settings) -> int:
         return 1
 
     candidates = [Candidate.parse(c) for c in arguments.candidates.split(",") if c.strip()]
-    clips, failures = asyncio.run(synthesise(passages, candidates=candidates, settings=settings))
+    billed = any(c.provider != "fake" for c in candidates)
+
+    async def run() -> tuple[list[Clip], list[str]]:
+        # Configuration first, database second: a missing key should be the
+        # first thing reported, not the second.
+        build_candidates(candidates, settings=settings)
+        async with open_ledger(settings, billed=billed) as ledger:
+            return await synthesise(
+                passages, candidates=candidates, settings=settings, ledger=ledger
+            )
+
+    try:
+        clips, failures = asyncio.run(run())
+    except (ProviderConfigurationError, LedgerUnavailableError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     for failure in failures:
         print(f"error: {failure}", file=sys.stderr)
     if not clips:

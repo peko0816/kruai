@@ -19,10 +19,12 @@ Three questions, and the acceptance for each comes from REAL_ENVIRONMENT:
    accuracy is a different implementation, and E9 cannot be written until
    this is known.
 
-The script never names a vendor. It asks `scoring.registry` for whatever
-`SCORING_PROVIDER` says, so running it against FakeScorer exercises every
-line of it without a key or a bill — which is how it was written, and how its
-tests run.
+The script never names a vendor. It asks `m0.providers` for whatever
+`SCORING_PROVIDER` says — the application registry for `fake`, the
+verification adapter in `m0.azure` for `azure` (D-126) — so running it
+against FakeScorer exercises every line of it without a key or a bill, which
+is how it was written and how its tests run. A billed run writes every call
+to `cost_ledger` and will not start if it cannot.
 
     make m0-scoring                              # FakeScorer, free, proves the wiring
     SCORING_PROVIDER=azure make m0-scoring ARGS="--confirm-spend"
@@ -42,8 +44,16 @@ from pathlib import Path
 from typing import Any, Final
 
 from app.core.config import Settings, get_settings
+from app.services.provider_errors import ProviderConfigurationError
 from app.services.scoring.base import AssessMode, Language, PronunciationResult
-from app.services.scoring.registry import get_scorer
+from m0.providers import (
+    LEDGER_REF,
+    Ledger,
+    LedgerUnavailableError,
+    Unbilled,
+    get_scorer,
+    open_ledger,
+)
 
 #: The two groups a sample can belong to. Named rather than boolean because
 #: "which group was this in" appears in the report, and `group=False` is not
@@ -139,25 +149,42 @@ def load_manifest(path: Path) -> list[Sample]:
     return samples
 
 
-async def score_all(samples: Sequence[Sample], *, settings: Settings) -> list[Scored]:
+async def score_all(
+    samples: Sequence[Sample], *, settings: Settings, ledger: Ledger | None = None
+) -> list[Scored]:
     """Assess every sample, in order, through whatever provider is configured.
 
     Sequential on purpose. This runs a few dozen times in total against a free
     tier, and a verification script that needs its own concurrency setting is
     a verification script with one more thing to get wrong.
+
+    Every call is recorded, failed ones included: a refused request costs
+    nothing, but it happened, and the failure count is part of the finding.
     """
+    ledger = ledger or Unbilled()
     scorer = get_scorer(Language.ZH_CN, settings=settings)
     scored: list[Scored] = []
     for sample in samples:
-        result = await scorer.assess(
-            sample.path.read_bytes(),
-            language=Language.ZH_CN,
-            mode=AssessMode.SCRIPTED,
-            reference_text=sample.reference_text,
-            audio_format=sample.audio_format,
-        )
+        async with ledger.external_call(provider=scorer.name, ref=LEDGER_REF) as entry:
+            result = await scorer.assess(
+                sample.path.read_bytes(),
+                language=Language.ZH_CN,
+                mode=AssessMode.SCRIPTED,
+                reference_text=sample.reference_text,
+                audio_format=sample.audio_format,
+            )
+            entry.record(unit="calls", quantity=1, cost_usd_cents=result.cost_usd_cents)
         scored.append(Scored(sample=sample, result=result))
     return scored
+
+
+async def _assess(samples: Sequence[Sample], *, settings: Settings) -> list[Scored]:
+    # Building the scorer touches nothing, so do it once before the database:
+    # a missing key should be the first thing reported, not the second.
+    get_scorer(Language.ZH_CN, settings=settings)
+    billed = settings.scoring_provider != "fake"
+    async with open_ledger(settings, billed=billed) as ledger:
+        return await score_all(samples, settings=settings, ledger=ledger)
 
 
 def overlap(good: Sequence[float], bad: Sequence[float]) -> float:
@@ -386,7 +413,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {problem}", file=sys.stderr)
         return 1
 
-    report = Report(tuple(asyncio.run(score_all(samples, settings=settings))))
+    try:
+        report = Report(tuple(asyncio.run(_assess(samples, settings=settings))))
+    except (ProviderConfigurationError, LedgerUnavailableError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     provider = settings.scoring_provider
 
     arguments.out.parent.mkdir(parents=True, exist_ok=True)

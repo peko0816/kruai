@@ -2963,3 +2963,42 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。
 - 影响范围：`backend/app/services/tts/{registry,fake}.py`、`m0/tts_blind.py` 与测试、
   `m0/README.md`、`docs/REAL_ENVIRONMENT.md`、`docs/HANDOFF_SHEETS.md`、`Makefile`。
+
+## D-126 Azure 验证实现放在 `m0/`，计费运行先开账本再发请求
+
+- 日期：2026-10-24
+- 背景：D-125 留下的问题——M0 要出结论就得调 Azure，而 CLAUDE.md 第 3 节在 M0 出结论前
+  不允许真实 provider 实现。项目所有者批准了 D-125 的提议。
+  资源确认：`ai-tutor-speech`，区域 `eastasia`，**免费档 F0**，与一个已暂停的项目共用
+  （所有者确认不影响成本归属）。免费的声音列表接口确认两个高棉语声音在该区域可用，均为 GA。
+- 选择：
+  1. **`m0/azure/` 下两个类**：`AzureTTS`、`AzureScorer`，原样实现规范接口，签名不改。
+     `app/services/` 一行未动，registry 里仍然只有 Fake。
+  2. **脚本经 `m0/providers.py` 取 provider**，没有往应用的 registry 里注册（D-125 原提议是注册进去）。
+     原因：注册要么改应用代码、要么在 m0 里改 registry 的私有字典，两者都比
+     「`azure` 走 m0、其余名字原样交给应用 registry」更难回退。`fake` 的行为因此与运行时完全一致。
+  3. **REST 而不是 Speech SDK**：SDK 是带音频栈的原生库，两个一辈子只发几十个请求的
+     验证脚本不值得引入二进制依赖；httpx 已在依赖里。
+  4. **计费运行先证明 `cost_ledger` 可写，再发第一个请求**（`SELECT 1 FROM cost_ledger LIMIT 0`）。
+     第 8 节说没记账的调用等于没发生；数据库挂了这件事，要在第一个请求之前发现，
+     不能等三十个请求之后。fake 运行不调外部、不记账、不需要数据库——脚本和它们的测试因此照旧不依赖 Postgres。
+     配置错误（没有 key）先于账本检查报出：只修一处就能跑，不必先起数据库再发现 key 没填。
+  5. **记账类别用 `content_production`**：一次性、没有学习者在背后的支出，PRD 11.3 把它排除在
+     每用户运营成本之外——M0 正是这样。为一个临时工具给应用的 `LedgerRef` 加类别，
+     等于为工具的方便改已验收的代码。`unit='calls'`：DATA_MODEL 的单位里没有「字符」。
+  6. **能在本地拒的，发请求前就拒，不花钱**：评测端点只收 16 kHz 单声道 16-bit wav 或 ogg/opus、
+     ≤ 60 秒。手机录音多为 44.1/48 kHz，这是最可能的失败，拒绝信息里直接给 ffmpeg 命令。
+  7. **F0 限流**：每分钟约 20 次，盲评导出 30 条一定会撞上。429 按 `Retry-After` 等（上限 60 秒），
+     最多 3 次；其他失败不重试（401 第二次还是 401，超时可能已经计费）。
+  8. **成本估算**：TTS 按 $15／百万字符，逐条**向下**取整（与 FakeTTS 同一理由：一句话是零点几美分，
+     逐条进位会让一次打包看起来花了一百美元）。评测的美国价没查到官方数字，按 $2／小时作上限，
+     逐条**向上**取整（`scoring/base.py`：未知时保守高估）。F0 实际不收费，这是升级后账本需要的数。
+- **未验证**：评测返回的 JSON 结构只对着微软文档写过。文档里有两种写法（分数直接在节点上 / 嵌在
+  `PronunciationAssessment` 下），两种都读；都不是时报 `scoring.malformed_response`，原文留在 `raw`。
+  第一次真实调用要有人盯着。
+- **测试**：全部对着 httpx MockTransport，不连网。21 个变异中 20 个被单测杀死；剩下的一个
+  （去掉账本的表存在性检查）只有真库能区分「库挂了」和「库在但没迁移」，由
+  `tests/integration/test_m0_ledger.py` 杀死。
+- 回退成本：低。删掉 `m0/azure/`、`m0/providers.py`，两个脚本的 import 改回应用 registry。
+- 影响范围：`m0/azure/`（新增）、`m0/providers.py`（新增）、`m0/scoring_check.py`、`m0/tts_blind.py`、
+  `m0/tests/`、`backend/tests/integration/test_m0_ledger.py`（新增）、`m0/README.md`、`docs/REAL_ENVIRONMENT.md`。

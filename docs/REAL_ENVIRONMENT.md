@@ -128,12 +128,13 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 
 | | |
 |---|---|
-| **要办什么** | Azure 订阅 → Speech 资源（建议 East Asia / Southeast Asia 区）→ 拿 `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION`。免费层 F0 足够 |
+| **要办什么** | ✅ **已办好（2026-10-24）**：沿用已有资源 `ai-tutor-speech`，区域 `eastasia`，免费档 F0；key 与区域已写入项目 `.env`，免费的声音列表接口验证通过。该资源与一个已暂停的项目共用 |
 | **还要录音** | 同一批 HSK1 句子（20 条左右），两组人各录一遍：**good 组** = 中文说得好的人；**bad 组** = **真实的柬埔寨初学者** |
 | **为什么 bad 组不能找人假装** | 评测模型对「装出来的错」和真实 L1 口音的反应不一样。用装的样本校准出来的及格线，上线后会系统性偏高或偏低，而这件事要到有真实用户数据时才会发现 |
 | **验收** | good/bad 平均分差 ≥ 15、重叠样本 ≤ 20%、音素级 JSON 非空；并据此给出 `ZH_TONE_MODE` 的结论（音素串是否自带声调数字） |
 | **解锁** | E9（真实 scoring adapter）+ **一次连带的参数重标定**：不能只调 `SCORING_PASS_THRESHOLD`，必须连同 `MASTERY_DELTA_BASE` 与三个 item 权重一起重标（遗留约束 **L-7** 算过：按当前默认值，`ease_factor` 会在掌握度还很低时就触底，间隔重复几乎不生效） |
-| **我需要的** | 录音文件（wav/mp3 均可）+ 每条对应的参考文本。拿到 key 和样本后，我写验证脚本跑出统计表并落 `docs/m0-1-scoring.md` |
+| **我需要的** | 录音文件 + 每条对应的参考文本。原始录音什么格式都行，我转成 Azure 要的 16 kHz 单声道 wav。验证脚本（D-122）与 Azure 验证实现（D-126）**都已就位**，录音到了就能跑，产出 `docs/m0-1-scoring.md` |
+| **未验证的部分** | 评测返回的 JSON 只对着微软文档写过。**第一次真实调用要有人盯着**；跑之前要先起数据库，因为每次调用都记入 `cost_ledger` |
 
 ### 4. LLM key —— 真实内容生成
 
@@ -156,6 +157,7 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 | **风险** | **没有备选了**。Azure 若不达标，原计划里没有第二家能顶上，要去找计划外的来源（例如开源模型） |
 | **盲评素材从哪来** | ✅ **已备好**：`m0/samples/khmer-corpus.csv`，15 句，取自 Tatoeba（`corpus.tatoeba`，CC BY 2.0 FR，逐句署名）。**不能用还没写完的课程文案**——那批高棉语本身还在抽检。原计划用 MoEYS OER，实地查看后不可用，见 D-124 |
 | **验收** | ≥2 位母语者独立盲评，自然度与可懂度均值 ≥ 4，无致命发音错误；产出 `docs/tts-decision.md`（含逻辑音色 → 厂商音色的映射表） |
+| **已就位** | 盲评脚本 + Azure 验证实现（D-126）。合成 30 条只需一条命令，等你点头（F0 免费，但仍按第 6 节先问） |
 | **解锁** | E8（真实 TTS adapter）→ M1 的「音频全部预生成」一项 |
 
 ### 6. 对象存储 + CDN
@@ -187,7 +189,7 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 
 | 前置 | 我要做的 | 已就位的部分 |
 |---|---|---|
-| 3（Azure key + 录音） | M0-1 验证脚本；E9 真实 scoring adapter + `scoring/zh_tone.py`；阈值与 mastery 参数重标定（L-7） | 接口、Fake、契约测试、整条 attempts 链路 |
+| 3（Azure key + 录音） | E9 真实 scoring adapter + `scoring/zh_tone.py`；阈值与 mastery 参数重标定（L-7） | 接口、Fake、契约测试、整条 attempts 链路；M0-1 验证脚本与 Azure 验证实现（D-122、D-126） |
 | 4（LLM key） | 真实 LLM provider 实现 | 抽象、prompt、schema、八条校验规则 |
 | 5（TTS 选型） | E8 真实 TTS adapter | 抽象、Fake、build_pack 的整条合成链路 |
 | 6（对象存储） | S3 backend | `MediaStore` 协议、本地实现、import 的发布流程 |
