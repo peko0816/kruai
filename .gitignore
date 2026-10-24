@@ -42,3 +42,13 @@ pipeline/packs/*-media/
 # Translator hand-off sheets: they go out and come back filled in; the filled
 # copy is merged with `make i18n-apply`, and the catalogue is what git keeps.
 locales/*.todo.csv
+
+# M0-2 blind test output: synthesised clips, and the key that un-blinds them.
+# Never committed: the key must not travel with the clips, and audio does not
+# belong in git.
+m0/tts-blind/
+m0/tts-blind-key.csv
+m0/tts-blind.zip
+
+# M0-1 recordings of real people. Personal data: never committed.
+m0/recordings/

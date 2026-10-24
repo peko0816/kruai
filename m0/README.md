@@ -30,6 +30,10 @@ ffmpeg -i 原始录音.m4a -ar 16000 -ac 1 -sample_fmt s16 good-01.wav
 
 ### 两组人怎么找
 
+**句子已备好：`m0/samples/recording-sentences.csv`，20 句**，原样取自 HSK1 内容包。
+怎么录、文件怎么命名、要对录音的人说什么，见 `docs/HANDOFF_SHEETS.md` 第 ⑤ 节。
+录音放进 `m0/recordings/`（不进仓库），manifest 根据文件名生成。
+
 - **good 组**：中文说得好的人，约 20 句
 - **bad 组**：**真实的柬埔寨初学者**，同样的 20 句
 

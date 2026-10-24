@@ -1,0 +1,21 @@
+﻿id,chinese,pinyin,concept
+01,请坐。,Qǐng zuò.,zh.hsk1.imperative_sentence
+02,下雨了。,Xià yǔ le.,zh.hsk1.non_subject_predicate_sentence
+03,我很忙。,Wǒ hěn máng.,zh.hsk1.adjective_predicate_sentence
+04,你几岁？,Nǐ jǐ suì?,zh.hsk1.ask_with_question_words
+05,他会唱歌吗？,Tā huì chàng gē ma?,zh.hsk1.ask_with_ma
+06,我不吃肉。,Wǒ bù chī ròu.,zh.hsk1.negation_adverbs
+07,他去不去学校？,Tā qù bu qù xuéxiào?,zh.hsk1.ask_affirmative_negative
+08,我买了一本书。,Wǒ mǎi le yì běn shū.,zh.hsk1.aspect_particle_le1
+09,今天比昨天冷。,Jīntiān bǐ zuótiān lěng.,zh.hsk1.prep_bi
+10,你是不是学生？,Nǐ shì bu shì xuésheng?,zh.hsk1.interrogative_sentence
+11,你喝茶还是喝水？,Nǐ hē chá háishi hē shuǐ?,zh.hsk1.ask_with_haishi
+12,他们一起吃饭。,Tāmen yìqǐ chī fàn.,zh.hsk1.scope_adverbs
+13,现在八点半。,Xiànzài bā diǎn bàn.,zh.hsk1.numerals
+14,天气非常好。,Tiānqì fēicháng hǎo.,zh.hsk1.degree_adverbs
+15,她正在写字。,Tā zhèngzài xiě zì.,zh.hsk1.aspect_progressive
+16,老师很认真。,Lǎoshī hěn rènzhēn.,zh.hsk1.subject_noun
+17,桌子上有一杯水。,Zhuōzi shang yǒu yì bēi shuǐ.,zh.hsk1.you_sentence
+18,我家有两个孩子。,Wǒ jiā yǒu liǎng ge háizi.,zh.hsk1.numerals
+19,你怎么去学校？,Nǐ zěnme qù xuéxiào?,zh.hsk1.ask_with_question_words
+20,他一边走，一边笑。,"Tā yìbiān zǒu, yìbiān xiào.",zh.hsk1.coordinate_complex_sentence
