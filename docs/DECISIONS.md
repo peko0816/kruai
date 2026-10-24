@@ -3002,3 +3002,20 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。删掉 `m0/azure/`、`m0/providers.py`，两个脚本的 import 改回应用 registry。
 - 影响范围：`m0/azure/`（新增）、`m0/providers.py`（新增）、`m0/scoring_check.py`、`m0/tts_blind.py`、
   `m0/tests/`、`backend/tests/integration/test_m0_ledger.py`（新增）、`m0/README.md`、`docs/REAL_ENVIRONMENT.md`。
+
+## D-127 M0-1 录音稿：20 句原样取自内容包，录音不进仓库
+
+- 日期：2026-10-24
+- 背景：M0-1 需要两组人录同一批句子，仓库里只有两句示例。PRD 与 REAL_ENVIRONMENT 只说了「约 20 句 HSK1」。
+- 选择：
+  1. **20 句原样取自 `zh-HSK1` 内容包的 `target_sentences`**，不另写。学习者将来练的就是这些句子，
+     在别的句子上定出的及格线未必适用于它们。脚本生成清单时逐句核对与内容包一致。
+  2. **按覆盖面挑，不按难度挑**：2–8 字的长度跨度，三声连读、"一""不"变调、轻声、
+     卷舌与平舌、ü 与 j/q/x、疑问语调各有覆盖。评测模型在哪类音上区分不了，要能从结果里看出来。
+  3. **稿子里不写"这句测什么"**：念的人看到"测三声变调"会刻意去读，good 组读得用力过度，
+     会把及格线抬到初学者够不着的地方。覆盖说明只写在 HANDOFF_SHEETS 里给项目所有者看。
+  4. **good 组可以是项目所有者本人，建议 2 人**；bad 组 2–3 位真实初学者，各录全部 20 句。
+  5. **录音是个人数据**：放 `m0/recordings/`（已加 `.gitignore`），录之前告知会发给 Azure 评测、只用于验证。
+     盲评输出（`m0/tts-blind/`、对照表、zip）一并加入 `.gitignore`——此前没有，对照表有被误提交的风险。
+- 回退成本：低。换句子只需换一个 CSV。
+- 影响范围：`m0/samples/recording-sentences.csv`（新增）、`docs/HANDOFF_SHEETS.md`、`m0/README.md`、`.gitignore`。
