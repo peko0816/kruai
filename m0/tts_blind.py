@@ -1,19 +1,24 @@
-"""M0-2: which vendor's Khmer actually sounds like Khmer?
+"""M0-2: does the Khmer voice actually sound like Khmer, and which one?
 
-`docs/REAL_ENVIRONMENT.md` item 5. Three candidates — Azure, Google Cloud TTS,
-ElevenLabs — and no way to choose between them from documentation, because
-what matters is whether a Khmer speaker finds the output natural, and none of
-the three will tell you that about themselves.
+`docs/REAL_ENVIRONMENT.md` item 5. The plan was three vendors. Checked against
+their own voice lists (D-125), only Azure has Khmer text-to-speech at all —
+Google's table goes from Kannada to Korean, ElevenLabs' from Kazakh to Kirghiz.
+So the question moved: not which vendor, but whether Azure's Khmer clears the
+bar, and which of its voices reads the narration and which the feedback.
 
-So it is a blind listening test, and the blinding is the part that has to be
-built rather than promised:
+What is compared is a *candidate*: a provider, optionally pinned to one of its
+vendor voices — ``azure:km-KH-SreymomNeural``. Three vendors and two voices of
+one vendor are the same experiment as far as the blinding is concerned, so the
+machinery did not change; only the unit it shuffles did.
 
-* **The vendor is not in the filename.** Clips are named by a digest, and the
-  key that maps a digest back to a vendor is written to a separate file the
-  reviewer never receives.
-* **The order is shuffled per passage.** Three clips in a fixed order is not
-  blind — a listener notices by the third passage that the first is always
-  the same voice, and from then on is rating a vendor rather than a clip.
+The blinding is the part that has to be built rather than promised:
+
+* **Nothing identifying is in the filename.** Clips are named by a digest, and
+  the key that maps a digest back to a candidate is written to a separate file
+  the reviewer never receives.
+* **The order is shuffled per passage.** Clips in a fixed order are not blind —
+  a listener notices by the third passage that the first is always the same
+  voice, and from then on is rating a voice rather than a clip.
 * **The shuffle is seeded from the passage**, so two people exporting the
   same material get the same sheet, and a score can be traced to the clip it
   was given for.
@@ -61,7 +66,7 @@ SHEET_COLUMNS: Final[tuple[str, ...]] = (
     "comment",
 )
 
-KEY_COLUMNS: Final[tuple[str, ...]] = ("clip", "passage", "provider", "resolved_voice")
+KEY_COLUMNS: Final[tuple[str, ...]] = ("clip", "passage", "candidate", "provider", "resolved_voice")
 
 
 @dataclass(frozen=True)
@@ -79,9 +84,31 @@ class Passage:
 
 
 @dataclass(frozen=True)
+class Candidate:
+    """What a reviewer is, without knowing it, choosing between.
+
+    A provider, and optionally the vendor voice it is pinned to. With only one
+    vendor offering Khmer, comparing vendors stopped being the question;
+    comparing that vendor's voices is the same experiment one level down.
+    """
+
+    provider: str
+    voice: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.provider}:{self.voice}" if self.voice else self.provider
+
+    @classmethod
+    def parse(cls, text: str) -> Candidate:
+        provider, _, voice = text.strip().partition(":")
+        return cls(provider=provider.strip(), voice=voice.strip())
+
+
+@dataclass(frozen=True)
 class Clip:
     passage: Passage
-    provider: str
+    candidate: Candidate
     resolved_voice: str
     audio: bytes
     audio_format: str
@@ -91,11 +118,11 @@ class Clip:
     def name(self) -> str:
         """A filename that says nothing about who made it.
 
-        Digested from the passage and the provider so it is stable across
+        Digested from the passage and the candidate so it is stable across
         runs — a reviewer who is sent the sheet twice gets the same names —
         while carrying neither in a readable form.
         """
-        digest = hashlib.sha256(f"{self.passage.id}/{self.provider}".encode()).hexdigest()
+        digest = hashlib.sha256(f"{self.passage.id}/{self.candidate.label}".encode()).hexdigest()
         return f"clip-{digest[:10]}.{self.audio_format}"
 
 
@@ -147,13 +174,22 @@ def load_corpus(path: Path) -> list[Passage]:
 
 
 async def synthesise(
-    passages: Sequence[Passage], *, providers: Sequence[str], settings: Settings
+    passages: Sequence[Passage], *, candidates: Sequence[Candidate], settings: Settings
 ) -> tuple[list[Clip], list[str]]:
-    """One clip per passage per provider. Failures are reported, not raised."""
+    """One clip per passage per candidate. Failures are reported, not raised.
+
+    A pinned candidate builds its provider with that voice standing behind
+    KM_NARRATOR, through the same registry every runtime caller uses — the
+    test listens to exactly what a pack build would produce, not to a voice
+    reached some other way.
+    """
     clips: list[Clip] = []
     failures: list[str] = []
-    for name in providers:
-        tts = build_tts(name)
+    for candidate in candidates:
+        tts = build_tts(
+            candidate.provider,
+            voices={Voice.KM_NARRATOR: candidate.voice} if candidate.voice else None,
+        )
         for passage in passages:
             result = await tts.synthesize(
                 passage.text,
@@ -161,12 +197,12 @@ async def synthesise(
                 speaking_rate=settings.tts_speaking_rate_km,
             )
             if not result.ok:
-                failures.append(f"{name}/{passage.id}: {result.error_code}")
+                failures.append(f"{candidate.label}/{passage.id}: {result.error_code}")
                 continue
             clips.append(
                 Clip(
                     passage=passage,
-                    provider=name,
+                    candidate=candidate,
                     resolved_voice=result.resolved_voice,
                     audio=result.audio,
                     audio_format=result.audio_format,
@@ -179,7 +215,7 @@ async def synthesise(
 def shuffled(clips: Sequence[Clip], *, seed: str) -> list[Clip]:
     """Clips grouped by passage, each group in its own shuffled order.
 
-    Grouped so a reviewer hears the same sentence three ways in a row, which
+    Grouped so a reviewer hears the same sentence each way in a row, which
     is what makes a comparison possible at all. Shuffled within the group
     because a fixed order stops being blind by the third passage.
     """
@@ -226,7 +262,8 @@ def write_key(clips: Sequence[Clip], path: Path) -> None:
                 {
                     "clip": clip.name,
                     "passage": clip.passage.id,
-                    "provider": clip.provider,
+                    "candidate": clip.candidate.label,
+                    "provider": clip.candidate.provider,
                     "resolved_voice": clip.resolved_voice,
                 }
             )
@@ -237,7 +274,7 @@ def write_key(clips: Sequence[Clip], path: Path) -> None:
 
 @dataclass(frozen=True)
 class Verdict:
-    provider: str
+    candidate: str
     means: dict[str, float]
     fatal: int
     reviewers: int
@@ -254,23 +291,23 @@ class Verdict:
 def tally(
     key: Sequence[dict[str, str]], sheets: Sequence[Sequence[dict[str, str]]]
 ) -> list[Verdict]:
-    """Un-blind the filled sheets and score each vendor.
+    """Un-blind the filled sheets and score each candidate.
 
     Takes the sheets as separate sequences rather than one concatenated list
     because "how many people rated this" is part of the acceptance, and
     pooling the rows first throws that away.
     """
-    provider_of = {row["clip"]: row["provider"] for row in key}
+    candidate_of = {row["clip"]: row["candidate"] for row in key}
     scores: dict[str, dict[str, list[float]]] = {}
     fatal: dict[str, int] = {}
     raters: dict[str, set[int]] = {}
 
     for number, sheet in enumerate(sheets):
         for row in sheet:
-            provider = provider_of.get(row.get("clip", ""))
-            if provider is None:
+            candidate = candidate_of.get(row.get("clip", ""))
+            if candidate is None:
                 continue
-            bucket = scores.setdefault(provider, {axis: [] for axis in AXES})
+            bucket = scores.setdefault(candidate, {axis: [] for axis in AXES})
             rated = False
             for axis in AXES:
                 raw = (row.get(axis) or "").strip()
@@ -278,20 +315,20 @@ def tally(
                     bucket[axis].append(float(raw))
                     rated = True
             if (row.get("fatal_error") or "").strip().lower() in {"y", "yes", "1", "true"}:
-                fatal[provider] = fatal.get(provider, 0) + 1
+                fatal[candidate] = fatal.get(candidate, 0) + 1
             if rated:
-                raters.setdefault(provider, set()).add(number)
+                raters.setdefault(candidate, set()).add(number)
 
     return [
         Verdict(
-            provider=provider,
+            candidate=candidate,
             means={
                 axis: statistics.fmean(values) if values else 0.0 for axis, values in bucket.items()
             },
-            fatal=fatal.get(provider, 0),
-            reviewers=len(raters.get(provider, set())),
+            fatal=fatal.get(candidate, 0),
+            reviewers=len(raters.get(candidate, set())),
         )
-        for provider, bucket in sorted(scores.items())
+        for candidate, bucket in sorted(scores.items())
     ]
 
 
@@ -302,40 +339,42 @@ def as_markdown(verdicts: Sequence[Verdict]) -> str:
     lines = [
         "# M0-2: Khmer voice selection",
         "",
-        f"Blind listening test, {len(verdicts)} vendor(s). "
+        f"Blind listening test, {len(verdicts)} candidate voice(s). "
         f"Acceptance: both means >= {MIN_MEAN:g} from >= {MIN_REVIEWERS} independent "
         "reviewers, with no fatal pronunciation error "
         "(docs/REAL_ENVIRONMENT.md item 5).",
         "",
-        "| vendor | " + " | ".join(AXES) + " | fatal | reviewers | result |",
+        "| candidate | " + " | ".join(AXES) + " | fatal | reviewers | result |",
         "|---" * (len(AXES) + 4) + "|",
     ]
     for v in verdicts:
         cells = " | ".join(f"{v.means[a]:.2f}" for a in AXES)
         lines.append(
-            f"| `{v.provider}` | {cells} | {v.fatal} | {v.reviewers} | "
+            f"| `{v.candidate}` | {cells} | {v.fatal} | {v.reviewers} | "
             f"{'pass' if v.passed else '**fail**'} |"
         )
     lines += [
         "",
-        f"**Choose `{best.provider}`.**" if best else "**No vendor passes.**",
+        f"**Choose `{best.candidate}`.**" if best else "**No candidate passes.**",
         "",
     ]
     if best is None:
         lines += [
-            "Nothing here clears the bar. The options are a fourth vendor, a",
-            "different voice from one of these, or accepting a lower bar — and the",
-            "last of those is a product decision about what a learner hears, not a",
-            "technical one.",
+            "Nothing here clears the bar, and of the three vendors planned only one",
+            "has Khmer at all (D-125), so there is no runner-up to fall back on.",
+            "The options are a source outside the original plan, or accepting a",
+            "lower bar — and the second of those is a product decision about what",
+            "a learner hears, not a technical one.",
             "",
         ]
+    narrator = Candidate.parse(best.candidate).voice if best else ""
     lines += [
         "## Voice mapping",
         "",
         "| logical voice | vendor voice |",
         "|---|---|",
-        "| `km_narrator` | _fill from the key file_ |",
-        "| `km_feedback` | _fill from the key file_ |",
+        f"| `km_narrator` | {f'`{narrator}`' if narrator else '_fill in_'} |",
+        "| `km_feedback` | _the narrator's voice, or the runner-up if it also passed_ |",
         "",
         "E8 reads this table. Until it is filled in, `TTS_PROVIDER` has nothing",
         "to resolve a logical voice to.",
@@ -354,8 +393,8 @@ def _export(arguments: argparse.Namespace, settings: Settings) -> int:
             print(f"error: {problem}", file=sys.stderr)
         return 1
 
-    providers = [p.strip() for p in arguments.providers.split(",") if p.strip()]
-    clips, failures = asyncio.run(synthesise(passages, providers=providers, settings=settings))
+    candidates = [Candidate.parse(c) for c in arguments.candidates.split(",") if c.strip()]
+    clips, failures = asyncio.run(synthesise(passages, candidates=candidates, settings=settings))
     for failure in failures:
         print(f"error: {failure}", file=sys.stderr)
     if not clips:
@@ -371,7 +410,8 @@ def _export(arguments: argparse.Namespace, settings: Settings) -> int:
 
     spent = sum(c.cost_usd_cents for c in clips)
     print(
-        f"{arguments.out}: {len(ordered)} clip(s) from {len(providers)} vendor(s), {spent} usd cents"
+        f"{arguments.out}: {len(ordered)} clip(s) from {len(candidates)} candidate(s), "
+        f"{spent} usd cents"
     )
     print(f"{arguments.key}: the mapping back to vendors — do NOT send this with the clips")
     print(f"Send the folder and scoring-sheet.csv to {MIN_REVIEWERS}+ reviewers, separately.")
@@ -396,7 +436,7 @@ def _score(arguments: argparse.Namespace) -> int:
     arguments.out.write_text(as_markdown(verdicts), encoding="utf-8")
     for v in verdicts:
         marks = " ".join(f"{a}={v.means[a]:.2f}" for a in AXES)
-        print(f"  {'pass' if v.passed else 'FAIL'}  {v.provider}: {marks} fatal={v.fatal}")
+        print(f"  {'pass' if v.passed else 'FAIL'}  {v.candidate}: {marks} fatal={v.fatal}")
     print(f"{arguments.out}: written")
     return 0 if any(v.passed for v in verdicts) else 1
 
@@ -407,7 +447,12 @@ def main(argv: list[str] | None = None) -> int:
 
     out = sub.add_parser("export", help="synthesise the clips and write the blind sheet")
     out.add_argument("corpus", type=Path, help="CSV: id, khmer, source")
-    out.add_argument("--providers", default="fake", help="comma-separated TTS_PROVIDER names")
+    out.add_argument(
+        "--candidates",
+        default="fake",
+        help="comma-separated provider[:vendor_voice], e.g. "
+        "azure:km-KH-SreymomNeural,azure:km-KH-PisethNeural",
+    )
     out.add_argument("--out", type=Path, default=Path("m0/tts-blind"))
     out.add_argument("--key", type=Path, default=Path("m0/tts-blind-key.csv"))
     out.add_argument("--seed", default="m0-2", help="changes the shuffle for a second round")
@@ -428,9 +473,15 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "score":
         return _score(arguments)
 
-    billed = [p.strip() for p in arguments.providers.split(",") if p.strip() != "fake"]
-    # Section 6 again: synthesis is billed per character, and three vendors
-    # over fifteen passages is three bills, not one.
+    billed = sorted(
+        {
+            Candidate.parse(c).provider
+            for c in arguments.candidates.split(",")
+            if c.strip() and Candidate.parse(c).provider != "fake"
+        }
+    )
+    # Section 6 again: synthesis is billed per character, and every candidate
+    # re-synthesises the whole corpus — two voices is two bills, not one.
     if billed and not arguments.confirm_spend:
         print(
             f"error: {billed} bill per character. Re-run with --confirm-spend "
