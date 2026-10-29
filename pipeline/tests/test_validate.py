@@ -23,13 +23,16 @@ from pipeline.validate import (
     check_hskk,
     check_khmer,
     check_length,
+    check_numbers,
     check_pinyin,
     check_sources,
     check_wordlist,
     fix_rows,
+    km_numbers,
     main,
     max_characters,
     validate,
+    zh_quantities,
 )
 from pipeline.wordlist import Wordlist
 
@@ -234,6 +237,114 @@ def test_a_placeholder_left_inside_real_khmer_is_still_refused() -> None:
 
 def test_khmer_quoting_chinese_is_still_khmer() -> None:
     assert check_khmer(f"「我要」 {KM}", where="x") == []
+
+
+# ------------------------------------- rule 4, glosses: the numbers have to agree
+#
+# Every case below that should fail is one the first real level shipped
+# (D-128); every case that should pass is a false alarm the first draft of the
+# check raised on that same level.
+
+
+@pytest.mark.parametrize(
+    ("chinese", "khmer"),
+    [
+        ("八元", "ប្រាំបីរៀល"),
+        ("九点十五分", "ម៉ោងប្រាំបួនដប់ប្រាំនាទី"),
+        ("九点十五分", "ម៉ោងប្រាំបួននាទី១៥"),
+        ("二十号", "ថ្ងៃទីម្ភៃ"),
+        ("三百元", "បីរយរៀល"),
+        ("十块零五分", "ដប់រៀលប្រាំសេន"),
+        ("两本书", "សៀវភៅពីរក្បាល"),
+        ("现在八点半。", "ឥឡូវនេះម៉ោងប្រាំបីពាក់កណ្ដាល។"),
+        ("五月五日", "ខែឧសភា ថ្ងៃទីប្រាំ"),
+        ("星期四", "ថ្ងៃព្រហស្បតិ៍"),
+    ],
+)
+def test_a_gloss_with_the_same_numbers_passes(chinese: str, khmer: str) -> None:
+    assert check_numbers(chinese, khmer, where="x") == []
+
+
+@pytest.mark.parametrize(
+    ("chinese", "khmer", "says"),
+    [
+        ("八元", "ប្រាំប៉ុន្មានរៀល", "[8]"),
+        ("九元五毛", "ប្រាំបីរៀលប្រាំសេន", "[9]"),
+        ("四块二毛六分", "បួនរៀលពីរសេនប្រាំហត្ថ", "[6]"),
+        ("两本书", "សៀវភៅពីក្បាល", "[2]"),
+        ("六点半", "ម៉ោងប្រាំពីរពាក់កណ្តាល", "[6]"),
+        ("五月五日", "ខែមិថុនា ថ្ងៃទីប្រាំ", "ឧសភា"),
+        ("星期三", "ថ្ងៃច័ន្ទ", "ពុធ"),
+        ("七点半", "ម៉ោងប្រាំពីរ", "half"),
+    ],
+)
+def test_a_gloss_with_a_different_number_is_refused(chinese: str, khmer: str, says: str) -> None:
+    problems = check_numbers(chinese, khmer, where="x")
+
+    assert rules(problems) == ["khmer"]
+    assert says in problems[0].message
+
+
+def test_five_inside_eight_does_not_count_as_five() -> None:
+    """ប្រាំបី (8) begins with ប្រាំ (5). Read shortest-first, an eight would
+    satisfy a five and 五块 glossed as eight would pass."""
+    assert km_numbers("ប្រាំបីរៀល") == [8]
+    assert check_numbers("五块", "ប្រាំបីរៀល", where="x") != []
+
+
+def test_a_number_said_twice_has_to_be_there_twice() -> None:
+    """二块二毛 has two twos. Compared as sets, one ពីរ would satisfy both."""
+    assert check_numbers("二块二毛", "ពីររៀលបីសេន", where="x") != []
+    assert check_numbers("二块二毛", "ពីររៀលពីរសេន", where="x") == []
+
+
+def test_one_person_is_one() -> None:
+    """ម្នាក់ is how 一个 is glossed for people: one word, not មួយ + a classifier."""
+    assert check_numbers("一个医生", "គ្រូពេទ្យម្នាក់", where="x") == []
+
+
+@pytest.mark.parametrize("chinese", ["我们一起吃饭。", "写了一点", "我们一块儿看书。", "有一些水"])
+def test_one_that_is_not_a_quantity_is_not_checked(chinese: str) -> None:
+    """一起, 一点, 一块儿, 一些: "together", "a little", "some" — no number to carry."""
+    assert zh_quantities(chinese) == []
+
+
+def test_one_that_is_a_time_or_an_amount_is_checked() -> None:
+    assert zh_quantities("一点半") == [1]
+    assert zh_quantities("一块钱") == [1]
+    assert zh_quantities("差一分八点") == [1, 8]
+
+
+def test_a_gloss_may_say_more_than_the_chinese() -> None:
+    """Only what is missing is reported: 三号 glossed with its "day" spelled out."""
+    assert check_numbers("三号", "ថ្ងៃទីបី ខែនេះ មួយ", where="x") == []
+
+
+def test_the_runner_checks_numbers_in_every_gloss_bearing_field() -> None:
+    """Wired into sentences, substitutions and dialogue prompts — not only defined."""
+    concept = a_concept(
+        target_sentences=[{"zh": "八元。", "pinyin": "bā yuán.", "km_gloss": "ប្រាំប៉ុន្មានរៀល។"}],
+        substitutions=[{"zh": "九点", "pinyin": "jiǔ diǎn", "km_gloss": "ម៉ោងប្រាំមួយ"}],
+        dialogues=[
+            {
+                "hskk_task_type": "listen_and_repeat",
+                "prompt_zh": "请说：六月十号",
+                "prompt_km": "សូមនិយាយ៖ ខែកក្កដា ថ្ងៃទី១០",
+                "sample_answer_zh": "六月十号",
+            }
+        ],
+    )
+
+    problems = validate(
+        a_draft(concepts=[concept.model_dump()]), settings=settings(), wordlist=a_wordlist()
+    )
+
+    flagged = sorted(p.where.split(").", 1)[1] for p in problems if "not in the Khmer" in p.message)
+    assert flagged == [
+        "dialogues[0].prompt_km",
+        "substitutions[0].km_gloss",
+        "target_sentences[0].km_gloss",
+    ]
 
 
 # ------------------------------------------------------- rule 5: concept 覆盖
