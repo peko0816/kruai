@@ -5,7 +5,7 @@
 | ``wordlist`` | a word above the level being taught |
 | ``length``   | a sentence longer than the level allows |
 | ``pinyin``   | pinyin that does not match the characters |
-| ``khmer``    | a Khmer field that is not written in Khmer |
+| ``khmer``    | a Khmer field that is not written in Khmer, or a gloss whose numbers, months or weekdays are not the Chinese line's |
 | ``coverage`` | a concept with too little material to teach from |
 | ``hskk``     | a concept with no HSKK task type, or a turn of a type it is not graded as |
 | ``duplicate``| two sentences too alike to both ship |
@@ -28,6 +28,7 @@ import csv
 import itertools
 import re
 import sys
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -294,6 +295,157 @@ def check_khmer(text: str, *, where: str, is_gloss: bool = False) -> list[Violat
     return []
 
 
+# ------------------------------------------------------------- numbers in glosses
+#
+# The first real level wrote 八 as ប្រាំប៉ុន្មាន ("five-something") and 九 as
+# ប្រាំបី ("eight"), put 五月 in June, and read 六点半 as half past seven. Every
+# one of those passed rule 4 — they are Khmer — and the round-two reviewer
+# found the eight in the sample, not the dozen outside it (D-128). A number is
+# the one part of a gloss a machine can check exactly, so it does.
+
+_ZH_DIGIT: Final[Mapping[str, int]] = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}  # fmt: skip
+
+#: Words a number counts or measures in HSK1 material. A numeral not followed by
+#: one of these is usually not a quantity at all: 一起, 一些, 一边, 一会.
+_ZH_UNITS: Final = "块元毛角分点号日岁个本杯口间页家年天次位张件只斤"
+
+#: 一点 is "a little" as often as "one o'clock", and 一块儿 is "together". The
+#: numeral counts only when what follows makes it a time or an amount.
+_AMBIGUOUS_ONE: Final[Mapping[str, str]] = {"点": "半钟零一二三四五六七八九十分", "块": "钱"}
+
+_ZH_QUANTITY: Final = re.compile(rf"([零一二两三四五六七八九十百]+)([{_ZH_UNITS}])")
+_ZH_MONTH: Final = re.compile(r"(十[一二]?|[一二三四五六七八九])月")
+_ZH_WEEKDAY: Final = re.compile(r"星期([一二三四五六日天])")
+
+#: Longest first, so ប្រាំបី is read as eight before ប្រាំ can be read as five.
+_KM_NUMBER_WORDS: Final[tuple[tuple[str, int], ...]] = tuple(
+    sorted(
+        {
+            "សូន្យ": 0, "មួយ": 1, "ពីរ": 2, "បី": 3, "បួន": 4, "ប្រាំ": 5,
+            "ប្រាំមួយ": 6, "ប្រាំពីរ": 7, "ប្រាំបី": 8, "ប្រាំបួន": 9,
+            "ដប់": 10, "ម្ភៃ": 20, "សាមសិប": 30, "សែសិប": 40, "ហាសិប": 50,
+            "ហុកសិប": 60, "ចិតសិប": 70, "ប៉ែតសិប": 80, "កៅសិប": 90, "រយ": 100,
+            # "One person", contracted from មួយនាក់; how 一个学生 is glossed.
+            "ម្នាក់": 1,
+        }.items(),
+        key=lambda item: -len(item[0]),
+    )
+)  # fmt: skip
+_KM_DIGITS: Final = re.compile(r"[0-9០-៩]+")
+
+#: Matched as stems: the closing signs (ព្រហស្បតិ៍, សៅរ៍) are spelled both ways.
+_KM_MONTHS: Final[Mapping[int, str]] = {
+    1: "មករា", 2: "កុម្ភៈ", 3: "មីនា", 4: "មេសា", 5: "ឧសភា", 6: "មិថុនា",
+    7: "កក្កដា", 8: "សីហា", 9: "កញ្ញា", 10: "តុលា", 11: "វិច្ឆិកា", 12: "ធ្នូ",
+}  # fmt: skip
+_KM_WEEKDAYS: Final[Mapping[str, str]] = {
+    "一": "ច័ន្ទ", "二": "អង្គារ", "三": "ពុធ", "四": "ព្រហស្បតិ",
+    "五": "សុក្រ", "六": "សៅរ", "日": "អាទិត្យ", "天": "អាទិត្យ",
+}  # fmt: skip
+#: ពាក់កណ្តាល is written with a subscript ត or a subscript ដ; they render alike.
+_KM_HALF: Final = ("ពាក់កណ្តាល", "ពាក់កណ្ដាល", "កន្លះ", "សាមសិប", "30", "៣០")
+
+
+def zh_number(text: str) -> int:
+    """A Chinese numeral up to the hundreds: 十五 is 15, 二十 is 20, 零五 is 5."""
+    total, current = 0, 0
+    for char in text:
+        if char == "百":
+            total += (current or 1) * 100
+            current = 0
+        elif char == "十":
+            total += (current or 1) * 10
+            current = 0
+        else:
+            current = _ZH_DIGIT[char]
+    return total + current
+
+
+def zh_quantities(chinese: str) -> list[int]:
+    """Every number in a Chinese line that counts something. Months are checked by name."""
+    found: list[int] = []
+    for match in _ZH_QUANTITY.finditer(chinese):
+        numeral, unit = match.groups()
+        following = chinese[match.end() : match.end() + 1]
+        # `following` is checked for emptiness first: "" is in every string.
+        ambiguous = numeral == "一" and unit in _AMBIGUOUS_ONE
+        if ambiguous and (not following or following not in _AMBIGUOUS_ONE[unit]):
+            continue
+        found.append(zh_number(numeral))
+    return found
+
+
+def km_numbers(khmer: str) -> list[int]:
+    """Every number in a Khmer line: spelled, in Khmer digits, or in Arabic ones.
+
+    A tens word followed by a units word is one number (ដប់ប្រាំ is 15), and a
+    units word before រយ multiplies it (មួយរយ is 100). Words that merely
+    contain a numeral (ជាមួយ, "with") add a spurious number; that can only
+    hide a missing one, never invent a missing one.
+    """
+    tokens: list[int | None] = []  # None: anything that is not a number word
+    position = 0
+    while position < len(khmer):
+        for word, value in _KM_NUMBER_WORDS:
+            if khmer.startswith(word, position):
+                tokens.append(value)
+                position += len(word)
+                break
+        else:
+            tokens.append(None)
+            position += 1
+
+    numbers: list[int] = []
+    last: int | None = None  # the number just read, while still adjacent to it
+    for token in tokens:
+        if token is None:
+            last = None
+        elif last is not None and token == 100 and 0 < last < 10:
+            numbers[-1] = last = last * 100
+        elif last is not None and 0 < token < 10 and last in range(10, 100, 10):
+            numbers[-1] = last + token
+            last = None
+        else:
+            numbers.append(token)
+            last = token
+    digits = str.maketrans("០១២៣៤៥៦៧៨៩", "0123456789")
+    numbers += [int(d.translate(digits)) for d in _KM_DIGITS.findall(khmer)]
+    return numbers
+
+
+def check_numbers(chinese: str, khmer: str, *, where: str) -> list[Violation]:
+    """Rule 4, for glosses: the Khmer carries the Chinese line's numbers, months and days.
+
+    Only what is missing is reported. A gloss may say more than the Chinese —
+    ថ្ងៃទីបី spells out the "day" in 三号 — but it may not say a different
+    number, and saying a different number is how a missing one shows up.
+    """
+    problems: list[str] = []
+
+    wanted = Counter(zh_quantities(chinese))
+    present = Counter(km_numbers(khmer))
+    missing = sorted((wanted - present).elements())
+    if missing:
+        problems.append(f"the number(s) {missing} are not in the Khmer")
+    if "点半" in chinese and not any(word in khmer for word in _KM_HALF):
+        problems.append("点半 is half past, and the Khmer has no half")
+    for match in _ZH_MONTH.finditer(chinese):
+        month = zh_number(match.group(1))
+        if _KM_MONTHS[month] not in khmer:
+            problems.append(f"{match.group(0)} is {_KM_MONTHS[month]}, which is not in the Khmer")
+    for match in _ZH_WEEKDAY.finditer(chinese):
+        day = _KM_WEEKDAYS[match.group(1)]
+        if day not in khmer:
+            problems.append(f"{match.group(0)} is ថ្ងៃ{day}, which is not in the Khmer")
+
+    return [
+        Violation("khmer", where, f"{problem}: {chinese!r} -> {khmer!r}") for problem in problems
+    ]
+
+
 def check_coverage(
     concept: ConceptDraft,
     *,
@@ -414,6 +566,7 @@ def validate(draft: Draft, *, settings: Settings, wordlist: Wordlist) -> list[Vi
             problems += check_wordlist(sentence.zh, wordlist, where=at)
             problems += check_pinyin(sentence.zh, sentence.pinyin, where=at)
             problems += check_khmer(sentence.km_gloss, where=f"{at}.km_gloss", is_gloss=True)
+            problems += check_numbers(sentence.zh, sentence.km_gloss, where=f"{at}.km_gloss")
             by_kind["target_sentences"].append((at, sentence.zh))
 
         for position, substitution in enumerate(concept.substitutions):
@@ -421,6 +574,9 @@ def validate(draft: Draft, *, settings: Settings, wordlist: Wordlist) -> list[Vi
             problems += check_wordlist(substitution.zh, wordlist, where=at)
             problems += check_pinyin(substitution.zh, substitution.pinyin, where=at)
             problems += check_khmer(substitution.km_gloss, where=f"{at}.km_gloss", is_gloss=True)
+            problems += check_numbers(
+                substitution.zh, substitution.km_gloss, where=f"{at}.km_gloss"
+            )
 
         for position, dialogue in enumerate(concept.dialogues):
             at = f"{where}.dialogues[{position}]"
@@ -442,6 +598,9 @@ def validate(draft: Draft, *, settings: Settings, wordlist: Wordlist) -> list[Vi
                 dialogue.sample_answer_zh, wordlist, where=f"{at}.sample_answer_zh"
             )
             problems += check_khmer(dialogue.prompt_km, where=f"{at}.prompt_km")
+            problems += check_numbers(
+                dialogue.prompt_zh, dialogue.prompt_km, where=f"{at}.prompt_km"
+            )
             by_kind["dialogue_prompts"].append((f"{at}.prompt_zh", dialogue.prompt_zh))
             by_kind["sample_answers"].append((f"{at}.sample_answer_zh", dialogue.sample_answer_zh))
 
