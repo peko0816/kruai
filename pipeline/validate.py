@@ -345,8 +345,22 @@ _KM_WEEKDAYS: Final[Mapping[str, str]] = {
     "一": "ច័ន្ទ", "二": "អង្គារ", "三": "ពុធ", "四": "ព្រហស្បតិ",
     "五": "សុក្រ", "六": "សៅរ", "日": "អាទិត្យ", "天": "អាទិត្យ",
 }  # fmt: skip
-#: ពាក់កណ្តាល is written with a subscript ត or a subscript ដ; they render alike.
-_KM_HALF: Final = ("ពាក់កណ្តាល", "ពាក់កណ្ដាល", "កន្លះ", "សាមសិប", "30", "៣០")
+#: Half past the hour is កន្លះ. ពាក់កណ្តាល is "half" of a thing, and the
+#: reviewer was explicit that it does not tell the time (D-129). Thirty minutes
+#: spelled out is half past too.
+_KM_HALF_PAST: Final = ("កន្លះ", "សាមសិប", "30", "៣០")
+
+#: Money is glossed the way Cambodians say a dollar price: whole units and
+#: សេន (cents). Khmer has no word for 毛 or 分, so 二毛 is ម្ភៃសេន and 五毛三分
+#: is ហាសិបបីសេន — the number written changes, and the check has to know how
+#: (D-129). 角 is the written form of 毛.
+_ZH_NUMERAL: Final = "[零一二两三四五六七八九十百]+"
+_ZH_TENTHS_AND_HUNDREDTHS: Final = re.compile(rf"({_ZH_NUMERAL})[毛角]({_ZH_NUMERAL})分")
+_ZH_TENTHS: Final = re.compile(rf"({_ZH_NUMERAL})[毛角]")
+
+#: A date is day before month in Khmer: ថ្ងៃទីប្រាំ ខែឧសភា, not the Chinese order.
+_ZH_DATE: Final = re.compile(rf"{_ZH_NUMERAL}月{_ZH_NUMERAL}[号日]")
+_KM_MONTH_BEFORE_DAY: Final = re.compile(r"ខែ\S+\s*ថ្ងៃទី")
 
 
 def zh_number(text: str) -> int:
@@ -416,6 +430,21 @@ def km_numbers(khmer: str) -> list[int]:
     return numbers
 
 
+def _money_in_cents(chinese: str) -> tuple[list[int], str]:
+    """The 毛 and 分 amounts as the សេន the Khmer should say, and what is left."""
+    cents: list[int] = []
+
+    def take(match: re.Match[str], value: int) -> str:
+        cents.append(value)
+        return ""
+
+    rest = _ZH_TENTHS_AND_HUNDREDTHS.sub(
+        lambda m: take(m, zh_number(m.group(1)) * 10 + zh_number(m.group(2))), chinese
+    )
+    rest = _ZH_TENTHS.sub(lambda m: take(m, zh_number(m.group(1)) * 10), rest)
+    return cents, rest
+
+
 def check_numbers(chinese: str, khmer: str, *, where: str) -> list[Violation]:
     """Rule 4, for glosses: the Khmer carries the Chinese line's numbers, months and days.
 
@@ -425,13 +454,16 @@ def check_numbers(chinese: str, khmer: str, *, where: str) -> list[Violation]:
     """
     problems: list[str] = []
 
-    wanted = Counter(zh_quantities(chinese))
+    wanted, rest = _money_in_cents(chinese)
+    wanted += zh_quantities(rest)
     present = Counter(km_numbers(khmer))
-    missing = sorted((wanted - present).elements())
+    missing = sorted((Counter(wanted) - present).elements())
     if missing:
         problems.append(f"the number(s) {missing} are not in the Khmer")
-    if "点半" in chinese and not any(word in khmer for word in _KM_HALF):
-        problems.append("点半 is half past, and the Khmer has no half")
+    if "点半" in chinese and not any(word in khmer for word in _KM_HALF_PAST):
+        problems.append("点半 is half past, which is កន្លះ")
+    if _ZH_DATE.search(chinese) and _KM_MONTH_BEFORE_DAY.search(khmer):
+        problems.append("a Khmer date puts the day before the month")
     for match in _ZH_MONTH.finditer(chinese):
         month = zh_number(match.group(1))
         if _KM_MONTHS[month] not in khmer:

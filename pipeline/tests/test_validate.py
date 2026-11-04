@@ -256,8 +256,8 @@ def test_khmer_quoting_chinese_is_still_khmer() -> None:
         ("三百元", "បីរយរៀល"),
         ("十块零五分", "ដប់រៀលប្រាំសេន"),
         ("两本书", "សៀវភៅពីរក្បាល"),
-        ("现在八点半。", "ឥឡូវនេះម៉ោងប្រាំបីពាក់កណ្ដាល។"),
-        ("五月五日", "ខែឧសភា ថ្ងៃទីប្រាំ"),
+        ("现在八点半。", "ឥឡូវនេះម៉ោងប្រាំបីកន្លះ។"),
+        ("五月五日", "ថ្ងៃទីប្រាំ ខែឧសភា"),
         ("星期四", "ថ្ងៃព្រហស្បតិ៍"),
     ],
 )
@@ -269,19 +269,19 @@ def test_a_gloss_with_the_same_numbers_passes(chinese: str, khmer: str) -> None:
     ("chinese", "khmer", "says"),
     [
         ("八元", "ប្រាំប៉ុន្មានរៀល", "[8]"),
-        ("九元五毛", "ប្រាំបីរៀលប្រាំសេន", "[9]"),
-        ("四块二毛六分", "បួនរៀលពីរសេនប្រាំហត្ថ", "[6]"),
+        ("九元五毛", "ប្រាំបីរៀលប្រាំសេន", "[9, 50]"),
+        ("四块二毛六分", "បួនរៀលពីរសេនប្រាំហត្ថ", "[26]"),
         ("两本书", "សៀវភៅពីក្បាល", "[2]"),
         ("六点半", "ម៉ោងប្រាំពីរពាក់កណ្តាល", "[6]"),
-        ("五月五日", "ខែមិថុនា ថ្ងៃទីប្រាំ", "ឧសភា"),
+        ("五月五日", "ថ្ងៃទីប្រាំ ខែមិថុនា", "ឧសភា"),
         ("星期三", "ថ្ងៃច័ន្ទ", "ពុធ"),
-        ("七点半", "ម៉ោងប្រាំពីរ", "half"),
+        ("七点半", "ម៉ោងប្រាំពីរ", "កន្លះ"),
     ],
 )
 def test_a_gloss_with_a_different_number_is_refused(chinese: str, khmer: str, says: str) -> None:
     problems = check_numbers(chinese, khmer, where="x")
 
-    assert rules(problems) == ["khmer"]
+    assert set(rules(problems)) == {"khmer"}
     assert says in problems[0].message
 
 
@@ -293,9 +293,51 @@ def test_five_inside_eight_does_not_count_as_five() -> None:
 
 
 def test_a_number_said_twice_has_to_be_there_twice() -> None:
-    """二块二毛 has two twos. Compared as sets, one ពីរ would satisfy both."""
-    assert check_numbers("二块二毛", "ពីររៀលបីសេន", where="x") != []
-    assert check_numbers("二块二毛", "ពីររៀលពីរសេន", where="x") == []
+    """Two people and two books are two twos. Compared as sets, one ពីរ would satisfy both."""
+    assert check_numbers("两个人两本书", "មនុស្សពីរនាក់ សៀវភៅបីក្បាល", where="x") != []
+    assert check_numbers("两个人两本书", "មនុស្សពីរនាក់ សៀវភៅពីរក្បាល", where="x") == []
+
+
+# The three conventions below are the round-two reviewer's answers (D-129).
+
+
+@pytest.mark.parametrize(
+    ("chinese", "khmer"),
+    [
+        ("二毛", "ម្ភៃសេន"),
+        ("三元二毛。", "បីយ័នម្ភៃសេន។"),
+        ("一块五毛三分。", "មួយយ័នហាសិបបីសេន។"),
+        ("四块二毛六分。", "បួនយ័នម្ភៃប្រាំមួយសេន។"),
+        ("十块零五分", "ដប់យ័នប្រាំសេន"),
+    ],
+)
+def test_mao_and_fen_are_said_as_cents(chinese: str, khmer: str) -> None:
+    """Khmer has no 毛 or 分; a price is whole units and សេន, as with dollars."""
+    assert check_numbers(chinese, khmer, where="x") == []
+
+
+def test_two_mao_is_twenty_cents_not_two() -> None:
+    """The inconsistency round two shipped: 二毛 corrected to ពីរសេន, two cents."""
+    problems = check_numbers("二毛", "ពីរសេន", where="x")
+
+    assert "[20]" in problems[0].message
+
+
+def test_half_past_is_kanlah() -> None:
+    """ពាក់កណ្តាល is half of a thing; telling the time it is កន្លះ."""
+    assert check_numbers("七点半", "ម៉ោងប្រាំពីរកន្លះ", where="x") == []
+    assert "កន្លះ" in check_numbers("七点半", "ម៉ោងប្រាំពីរពាក់កណ្តាល", where="x")[0].message
+
+
+def test_half_of_a_thing_may_stay_pheakkandal() -> None:
+    assert check_numbers("吃了一半", "បានញ៉ាំពាក់កណ្តាល", where="x") == []
+
+
+def test_a_date_is_day_before_month() -> None:
+    assert check_numbers("九月三号", "ថ្ងៃទីបី ខែកញ្ញា", where="x") == []
+    problems = check_numbers("九月三号", "ខែកញ្ញា ថ្ងៃទីបី", where="x")
+
+    assert "day before the month" in problems[0].message
 
 
 def test_one_person_is_one() -> None:
