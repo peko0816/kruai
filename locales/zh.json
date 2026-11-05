@@ -13,6 +13,7 @@
   "bot.lesson_resumed": "继续 {title}，第 {step} / {count} 步",
   "bot.lesson_started": "{title} — 共 {count} 步。",
   "bot.lesson_stopped": "课程已停止。发送 /learn 继续。",
+  "bot.model_answer": "{text}",
   "bot.no_content": "目前还没有可用的课程。",
   "bot.not_in_lesson": "当前没有进行中的课程。发送 /learn 开始。",
   "bot.payments_unavailable": "付费计划尚未推出。免费套餐里的所有功能仍然可以正常使用。",

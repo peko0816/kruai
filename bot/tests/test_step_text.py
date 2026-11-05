@@ -41,5 +41,36 @@ def test_empty_fields_are_left_out_rather_than_shown_as_blank_lines() -> None:
     assert text_of("vocab", payload) == "我要水。"
 
 
+def test_a_question_carries_its_answer_for_after_and_nothing_else_does() -> None:
+    from bot.api_client import _step_from
+
+    question = _step_from(
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "item_type": "qa",
+            "payload": qa_payload(
+                hskk_task_type="listen_and_repeat",
+                prompt_zh="请说:我要水。",
+                prompt_km="សូមនិយាយ",
+                sample_answer_zh="我要水。",
+                sample_answer_audio_url="https://cdn.example/a.mp3",
+            ),
+        }
+    )
+    drill = _step_from(
+        {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "item_type": "drill",
+            "payload": spoken_payload(target_text="我要水。", pinyin="", km_gloss=""),
+        }
+    )
+
+    assert (question.answer_text, question.answer_audio_url) == (
+        "我要水。",
+        "https://cdn.example/a.mp3",
+    )
+    assert (drill.answer_text, drill.answer_audio_url) == ("", None)
+
+
 def test_an_unknown_kind_of_step_renders_empty_rather_than_failing() -> None:
     assert text_of("roleplay", {"anything": "x"}) == ""

@@ -372,6 +372,10 @@ def _write_items(
                 prompt_zh=dialogue.prompt_zh,
                 prompt_km=dialogue.prompt_km,
                 sample_answer_zh=dialogue.sample_answer_zh,
+                # A URL rather than a media_assets row: that table holds one
+                # audio per item, chosen by media.resolve(), and this is a
+                # second recording heard after the question (D-132).
+                sample_answer_audio_url=urls.get(dialogue.sample_answer_audio_zh, ""),
             ),
             dialogue.prompt_audio_zh,
         )

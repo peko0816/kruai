@@ -94,6 +94,14 @@ SCORABLE_ITEM_TYPES = frozenset({"drill", "vocab", "qa"})
 #: has nothing to align to (scoring/base.py AssessMode).
 SCRIPTED_ITEM_TYPES = frozenset({"drill", "vocab"})
 
+#: HSKK task types whose answer is fixed: the learner repeats or reads out the
+#: one sentence the pack gives. PRD 4.1 — "when the reference text is known,
+#: always use scripted" — so these Q&A items are scored against their sample
+#: answer. Scored unscripted, "passed" only meant "pronounced clearly": a
+#: learner could say anything at all (D-132). The other types take answers in
+#: the learner's own words, which have no single text to align to.
+FIXED_ANSWER_TASK_TYPES = frozenset({"listen_and_repeat", "read_aloud"})
+
 #: i18n keys for the spoken feedback (CLAUDE.md section 7 — no inline copy).
 FEEDBACK_PASSED_KEY = "attempt.feedback.passed"
 FEEDBACK_RETRY_KEY = "attempt.feedback.retry"
@@ -343,17 +351,30 @@ async def _load_target(session: AsyncSession, lesson_item_id: uuid.UUID) -> _Tar
             f"course language {language_tag!r} has no scorer mapping; known: {sorted(_LANGUAGES)}"
         )
 
-    scripted = item.item_type in SCRIPTED_ITEM_TYPES
+    field = _reference_field(item)
+    scripted = field is not None
     return _Target(
         item=item,
         language=language,
-        reference_text=_reference_text(item) if scripted else None,
+        reference_text=_reference_text(item, field) if field is not None else None,
         mode=AssessMode.SCRIPTED if scripted else AssessMode.UNSCRIPTED,
         km_explanation=km_explanation,
     )
 
 
-def _reference_text(item: LessonItem) -> str:
+def _reference_field(item: LessonItem) -> str | None:
+    """Which payload field holds the sentence to score against, or None for an open answer."""
+    if item.item_type in SCRIPTED_ITEM_TYPES:
+        return TARGET_TEXT_FIELD
+    if (
+        item.item_type == "qa"
+        and item.payload.get(payloads.HSKK_TASK_TYPE) in FIXED_ANSWER_TASK_TYPES
+    ):
+        return payloads.SAMPLE_ANSWER_ZH
+    return None
+
+
+def _reference_text(item: LessonItem, field: str) -> str:
     """The sentence a scripted item expects, out of the pack's payload.
 
     Raises:
@@ -362,11 +383,11 @@ def _reference_text(item: LessonItem) -> str:
             learner's — so it fails loudly here instead of degrading into an
             unscripted assessment nobody asked for (D-036).
     """
-    value = item.payload.get(TARGET_TEXT_FIELD)
+    value = item.payload.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(
             f"lesson_item {item.id} is {item.item_type!r} but its payload has no "
-            f"usable {TARGET_TEXT_FIELD!r}; the pack should not have imported"
+            f"usable {field!r}; the pack should not have imported"
         )
     return value
 

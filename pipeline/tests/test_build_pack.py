@@ -126,6 +126,18 @@ def test_the_fake_provider_produces_a_complete_pack(tmp_path: Path) -> None:
     assert pack.media
 
 
+def test_a_model_answer_that_did_not_synthesise_is_reported_missing(tmp_path: Path) -> None:
+    """The answer is heard after the question (D-132); a pack without it has to say so."""
+    pack = make(a_draft(concepts=1), tmp_path)
+    concept = pack.concepts[0]
+    silent = concept.dialogues[0].model_copy(update={"sample_answer_audio_zh": ""})
+    broken = pack.model_copy(
+        update={"concepts": (concept.model_copy(update={"dialogues": (silent,)}),)}
+    )
+
+    assert broken.missing_audio == (f"{concept.slug}/dialogues[0].sample_answer_zh",)
+
+
 def test_every_clip_is_on_disk_where_the_pack_says_it_is(tmp_path: Path) -> None:
     pack = make(a_draft(), tmp_path)
 

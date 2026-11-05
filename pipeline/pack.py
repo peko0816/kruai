@@ -98,6 +98,11 @@ class PackDialogue(BaseModel):
     sample_answer_zh: str
     prompt_audio_zh: str = ""
     prompt_audio_km: str = ""
+    #: The model answer, read aloud: what the learner hears once a question is
+    #: behind them (D-132). Added after packs v1 were built, so a pack from
+    #: before it neither carries the field nor matches its own checksum any
+    #: more; those packs predate D-130 as well and are rebuilt, not imported.
+    sample_answer_audio_zh: str = ""
 
 
 class PackConcept(BaseModel):
@@ -204,4 +209,6 @@ class Pack(BaseModel):
                     gaps.append(f"{concept.slug}/dialogues[{index}].prompt_zh")
                 if not dialogue.prompt_audio_km:
                     gaps.append(f"{concept.slug}/dialogues[{index}].prompt_km")
+                if not dialogue.sample_answer_audio_zh:
+                    gaps.append(f"{concept.slug}/dialogues[{index}].sample_answer_zh")
         return tuple(gaps)

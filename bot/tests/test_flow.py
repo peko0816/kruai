@@ -190,6 +190,65 @@ def test_running_out_of_retries_on_the_last_step_still_finishes() -> None:
     assert turn.session is None
 
 
+# --------------------------------------------------------- the model answer (D-132)
+
+
+def asking(answer: str = "我要水。", audio: str | None = "https://cdn.example/a.mp3") -> Lesson:
+    question = step("qa", "你要什么?", answer_text=answer, answer_audio_url=audio)
+    return Lesson(lesson_id=uuid.uuid4(), title="t", steps=(question, step("drill")))
+
+
+def test_the_model_answer_follows_a_passed_question() -> None:
+    unit = asking()
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(unit, session, passed=True, score=90.0, max_retry=MAX_RETRY)
+
+    assert keys(turn) == ["bot.score_passed", "bot.model_answer", "bot.prompt_drill"]
+    answer = turn.replies[1]
+    assert answer.params == {"text": "我要水。"}
+    assert answer.audio_url == "https://cdn.example/a.mp3"
+
+
+def test_the_model_answer_follows_a_question_the_learner_ran_out_of_tries_on() -> None:
+    """The moment they most need to hear it."""
+    unit = asking()
+    session = Session(lesson_id=unit.lesson_id, attempts_used=MAX_RETRY)
+
+    turn = on_voice_scored(unit, session, passed=False, score=20.0, max_retry=MAX_RETRY)
+
+    assert keys(turn)[:2] == ["bot.score_failed_moving_on", "bot.model_answer"]
+
+
+def test_the_model_answer_is_not_given_away_before_a_retry() -> None:
+    unit = asking()
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(unit, session, passed=False, score=20.0, max_retry=MAX_RETRY)
+
+    assert "bot.model_answer" not in keys(turn)
+
+
+def test_a_question_on_the_last_step_still_gets_its_answer() -> None:
+    question = step("qa", "你要什么?", answer_text="我要水。")
+    unit = Lesson(lesson_id=uuid.uuid4(), title="t", steps=(question,))
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(unit, session, passed=True, score=90.0, max_retry=MAX_RETRY)
+
+    assert keys(turn) == ["bot.score_passed", "bot.model_answer"]
+    assert turn.finished
+
+
+def test_a_step_without_an_answer_says_nothing_extra() -> None:
+    unit = lesson("drill", "vocab")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(unit, session, passed=True, score=90.0, max_retry=MAX_RETRY)
+
+    assert "bot.model_answer" not in keys(turn)
+
+
 def test_the_verdict_never_second_guesses_the_api() -> None:
     """``passed`` is the server's answer. Recomputing it from the score here
     would be a second copy of a threshold M0-1 is going to move."""

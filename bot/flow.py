@@ -52,6 +52,10 @@ class Step:
     video_url: str | None = None
     #: Set by the server only when video is being served (PRD 7.4).
     disclaimer_key: str | None = None
+    #: A question's model answer, shown and played once the question is behind
+    #: the learner — passed, or out of tries — and never before (D-132).
+    answer_text: str = ""
+    answer_audio_url: str | None = None
 
     @property
     def expects_voice(self) -> bool:
@@ -192,11 +196,18 @@ def on_voice_scored(
 
 
 def _advance(lesson: Lesson, session: Session, verdict: Reply) -> Turn:
-    """Move past the current step, saying ``verdict`` on the way out."""
+    """Move past the current step, saying ``verdict`` and the model answer on the way out."""
+    step = lesson.steps[session.step_index]
+    preface: tuple[Reply, ...] = (verdict,)
+    if step.answer_text:
+        # Content, not copy: the key renders the answer and nothing else.
+        preface += (
+            Reply("bot.model_answer", {"text": step.answer_text}, audio_url=step.answer_audio_url),
+        )
     next_index = session.step_index + 1
     if next_index >= len(lesson.steps):
-        return Turn(replies=(verdict,), session=None, finished=True)
-    return _present(lesson, session.at(next_index), preface=(verdict,))
+        return Turn(replies=preface, session=None, finished=True)
+    return _present(lesson, session.at(next_index), preface=preface)
 
 
 def _present(lesson: Lesson, session: Session, *, preface: tuple[Reply, ...]) -> Turn:

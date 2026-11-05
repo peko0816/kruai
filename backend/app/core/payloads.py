@@ -34,6 +34,8 @@ HSKK_TASK_TYPE: Final = "hskk_task_type"
 PROMPT_ZH: Final = "prompt_zh"
 PROMPT_KM: Final = "prompt_km"
 SAMPLE_ANSWER_ZH: Final = "sample_answer_zh"
+#: Where the model answer can be heard; empty when it did not synthesise (D-132).
+SAMPLE_ANSWER_AUDIO_URL: Final = "sample_answer_audio_url"
 
 
 class ExplainPayload(TypedDict):
@@ -54,6 +56,7 @@ class QaPayload(TypedDict):
     prompt_zh: str
     prompt_km: str
     sample_answer_zh: str
+    sample_answer_audio_url: str
 
 
 def explain_payload(*, pattern: str, km_explanation: str) -> ExplainPayload:
@@ -65,13 +68,19 @@ def spoken_payload(*, target_text: str, pinyin: str, km_gloss: str) -> SpokenPay
 
 
 def qa_payload(
-    *, hskk_task_type: str, prompt_zh: str, prompt_km: str, sample_answer_zh: str
+    *,
+    hskk_task_type: str,
+    prompt_zh: str,
+    prompt_km: str,
+    sample_answer_zh: str,
+    sample_answer_audio_url: str = "",
 ) -> QaPayload:
     return {
         "hskk_task_type": hskk_task_type,
         "prompt_zh": prompt_zh,
         "prompt_km": prompt_km,
         "sample_answer_zh": sample_answer_zh,
+        "sample_answer_audio_url": sample_answer_audio_url,
     }
 
 
@@ -83,6 +92,7 @@ __all__ = [
     "PINYIN",
     "PROMPT_KM",
     "PROMPT_ZH",
+    "SAMPLE_ANSWER_AUDIO_URL",
     "SAMPLE_ANSWER_ZH",
     "TARGET_TEXT",
     "ExplainPayload",
