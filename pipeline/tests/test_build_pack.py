@@ -10,6 +10,7 @@ checked.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -493,3 +494,79 @@ def test_a_built_explanation_quoting_chinese_carries_both_voices(tmp_path: Path)
 
     assert explanation.text == EXAMPLE
     assert explanation.id != text_hash(EXAMPLE, voice="km_narrator", speaking_rate=1.0)
+
+
+class _OneRequest(_Voice):
+    """A provider that can read several voices in one go, like Azure (D-139)."""
+
+    def __init__(self, name: str = "both") -> None:
+        super().__init__(name)
+        self.requests: list[list[tuple[Voice, str, float]]] = []
+
+    async def synthesize_pieces(
+        self, pieces: Sequence[tuple[Voice, str, float]], *, audio_format: str = "mp3"
+    ) -> SynthesisResult:
+        self.requests.append(list(pieces))
+        return SynthesisResult(
+            ok=True,
+            audio=b"".join(text.encode() for _, text, _ in pieces),
+            duration_ms=42,
+            resolved_voice="km-voice+zh-voice",
+        )
+
+
+async def test_a_provider_that_reads_several_voices_gets_one_request(tmp_path: Path) -> None:
+    configured = settings(TTS_SPEAKING_RATE_ZH="0.9", TTS_SPEAKING_RATE_KM="1.0")
+    synth = Synthesiser(settings=configured, media_dir=tmp_path / "media")
+    both = _OneRequest()
+
+    identity = await synth.say_khmer(EXAMPLE, km=both, zh=_OneRequest())
+
+    assert len(both.requests) == 1
+    assert both.said == [], "no piece went through synthesize()"
+    assert [(voice, text) for voice, text, _ in both.requests[0]] == [
+        (Voice.KM_NARRATOR, f'{KM} "'),
+        (Voice.ZH_MODEL, "书在桌子上"),
+        (Voice.KM_NARRATOR, f'" មានន័យថា {KM}។'),
+    ]
+    assert both.requests[0][1][2] == 0.9
+    asset = {a.id: a for a in synth.assets}[identity]
+    assert asset.duration_ms == 42
+    assert asset.resolved_voice == "km-voice+zh-voice"
+
+
+async def test_two_different_providers_fall_back_to_joining(tmp_path: Path) -> None:
+    """One request needs one provider to read both voices."""
+    synth = Synthesiser(settings=settings(), media_dir=tmp_path / "media")
+    km, zh = _OneRequest("km"), _OneRequest("zh")
+
+    await synth.say_khmer(EXAMPLE, km=km, zh=zh)
+
+    assert km.requests == [] and zh.requests == []
+    assert zh.said == [("书在桌子上", Voice.ZH_MODEL, 0.9)]
+
+
+async def test_one_request_and_joined_audio_are_different_files(tmp_path: Path) -> None:
+    """The two methods make different audio, so they cannot share an identity."""
+    joined = Synthesiser(settings=settings(), media_dir=tmp_path / "a")
+    whole = Synthesiser(settings=settings(), media_dir=tmp_path / "b")
+
+    first = await joined.say_khmer(EXAMPLE, km=_Voice("km"), zh=_Voice("zh"))
+    second = await whole.say_khmer(EXAMPLE, km=_OneRequest(), zh=_OneRequest())
+
+    assert first and second and first != second
+
+
+async def test_a_failed_one_request_fails_the_clip(tmp_path: Path) -> None:
+    class Refusing(_OneRequest):
+        async def synthesize_pieces(
+            self, pieces: Sequence[tuple[Voice, str, float]], *, audio_format: str = "mp3"
+        ) -> SynthesisResult:
+            return SynthesisResult(ok=False, error_code="tts.too_many_voices")
+
+    synth = Synthesiser(settings=settings(), media_dir=tmp_path / "media")
+
+    identity = await synth.say_khmer(EXAMPLE, km=Refusing(), zh=Refusing())
+
+    assert identity == ""
+    assert synth.failures == [(EXAMPLE, "tts.too_many_voices")]

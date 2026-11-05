@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from app.services.provider_errors import ProviderConfigurationError
-from app.services.tts.azure import AzureTTS, ssml
+from app.services.tts.azure import MAX_VOICE_PIECES, AzureTTS, ssml, ssml_pieces
 from app.services.tts.base import Voice
 from tests.unit.azure_recorder import KEY, Recorder, no_sleep
 
@@ -145,3 +145,65 @@ async def test_an_empty_200_is_a_failure_not_silence() -> None:
     result = await tts(recorder).synthesize("ក", voice=Voice.KM_NARRATOR)
 
     assert result.error_code == "tts.empty_audio"
+
+
+# ------------------------------------------------- several voices, one request (D-139)
+
+KM_TEXT = "ឧទាហរណ៍"
+PIECES = [
+    (Voice.KM_NARRATOR, KM_TEXT, 1.0),
+    (Voice.ZH_MODEL, "书在桌子上", 0.9),
+    (Voice.KM_NARRATOR, "មានន័យថា", 1.0),
+]
+
+
+def test_each_piece_is_its_own_voice_at_its_own_rate_in_order() -> None:
+    body = ssml_pieces(
+        [
+            ("km-KH-SreymomNeural", KM_TEXT, 1.0),
+            ("zh-CN-XiaoxiaoNeural", "书 & 桌", 0.9),
+        ]
+    )
+
+    km_at = body.index("km-KH-SreymomNeural")
+    zh_at = body.index("zh-CN-XiaoxiaoNeural")
+    assert km_at < zh_at
+    assert body.count("<voice ") == 2
+    assert "-10%" in body[zh_at:] and "+0%" in body[km_at:zh_at]
+    assert "书 &amp; 桌" in body
+    assert body.startswith("<speak version='1.0' xml:lang=\"km-KH\">"), "the first voice's language"
+
+
+async def test_several_voices_come_back_as_one_recording() -> None:
+    recorder = Recorder(httpx.Response(200, content=b"\xff" * 6000))
+
+    result = await tts(recorder).synthesize_pieces(PIECES)
+
+    assert len(recorder.requests) == 1
+    body = recorder.requests[0].content.decode()
+    assert body.count("<voice ") == 3
+    assert result.ok
+    assert result.resolved_voice == "km-KH-SreymomNeural+zh-CN-XiaoxiaoNeural"
+    assert result.duration_ms == 1000
+
+
+@pytest.mark.parametrize(
+    ("pieces", "code"),
+    [
+        ([], "tts.empty_text"),
+        ([(Voice.KM_NARRATOR, "  ", 1.0)], "tts.empty_text"),
+        ([(Voice.EN_MODEL, "hello", 1.0)], "tts.unsupported_voice"),
+        ([(Voice.ZH_MODEL, "我", 0.1)], "tts.invalid_speaking_rate"),
+        ([(Voice.ZH_MODEL, "我", 1.0)] * (MAX_VOICE_PIECES + 1), "tts.too_many_voices"),
+    ],
+    ids=["none", "blank", "no-voice", "bad-rate", "too-many"],
+)
+async def test_pieces_azure_would_refuse_are_refused_without_a_request(
+    pieces: list[tuple[Voice, str, float]], code: str
+) -> None:
+    recorder = Recorder()
+
+    result = await tts(recorder).synthesize_pieces(pieces)
+
+    assert result.error_code == code
+    assert recorder.requests == []

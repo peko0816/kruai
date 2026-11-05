@@ -32,9 +32,9 @@ import datetime as dt
 import json
 import re
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Final, Protocol, runtime_checkable
 
 from app.core.config import Settings, get_settings
 from app.services.tts.base import SynthesisResult, TTSProvider, Voice
@@ -97,6 +97,19 @@ def voiced_segments(text: str) -> list[tuple[str, str]]:
     if _SAYABLE.search(rest):
         pieces.append(("km", rest))
     return pieces
+
+
+@runtime_checkable
+class SpeaksInSeveralVoices(Protocol):
+    """A provider that can read pieces in different voices as one recording.
+
+    Optional: tts/base.py does not ask for it. Azure has it (D-139); a provider
+    without it gets the pieces synthesised one by one and joined (D-138).
+    """
+
+    async def synthesize_pieces(
+        self, pieces: Sequence[tuple[Voice, str, float]], *, audio_format: str = "mp3"
+    ) -> SynthesisResult: ...
 
 
 class Synthesiser:
@@ -164,6 +177,41 @@ class Synthesiser:
         )
         return identity
 
+    async def _say_in_one_request(
+        self,
+        text: str,
+        provider: SpeaksInSeveralVoices,
+        *,
+        plan: list[tuple[str, str, float]],
+        identity: str,
+        rate: float,
+    ) -> str:
+        result = await provider.synthesize_pieces(
+            [(VOICE_FOR[language], piece, piece_rate) for language, piece, piece_rate in plan]
+        )
+        self.calls += 1
+        self.cost_usd_cents += result.cost_usd_cents
+        if not result.ok:
+            self.failures.append((text, result.error_code or "tts.failed"))
+            return ""
+        path = f"km/{identity[:2]}/{identity}.{result.audio_format}"
+        destination = self._media_dir / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(result.audio)
+        self._assets[identity] = MediaAsset(
+            id=identity,
+            language="km",
+            voice=Voice.KM_NARRATOR.value,
+            resolved_voice=result.resolved_voice,
+            provider=getattr(provider, "name", "unknown"),
+            speaking_rate=rate,
+            text=text,
+            path=path,
+            duration_ms=result.duration_ms,
+            bytes=len(result.audio),
+        )
+        return identity
+
     async def say_khmer(self, text: str, *, km: TTSProvider, zh: TTSProvider) -> str:
         """Khmer text, with any Chinese it quotes read by the Chinese voice (D-138).
 
@@ -182,14 +230,23 @@ class Synthesiser:
             for language, piece in pieces
         ]
         km_rate = speaking_rate_for(Voice.KM_NARRATOR, settings=self._settings)
+        # One request when one provider reads both voices and can do it in
+        # one go (D-139); otherwise piece by piece, joined (D-138). The method
+        # is part of the identity: the two make different audio.
+        one_request = isinstance(km, SpeaksInSeveralVoices) and km.name == zh.name
+        method = "one-request" if one_request else "joined"
         identity = text_hash(
             json.dumps(plan, ensure_ascii=False),
-            voice=f"{Voice.KM_NARRATOR.value}+{Voice.ZH_MODEL.value}",
+            voice=f"{Voice.KM_NARRATOR.value}+{Voice.ZH_MODEL.value}/{method}",
             speaking_rate=km_rate,
         )
         if identity in self._assets:
             self.reused += 1
             return identity
+        if isinstance(km, SpeaksInSeveralVoices) and one_request:
+            return await self._say_in_one_request(
+                text, km, plan=plan, identity=identity, rate=km_rate
+            )
 
         audio: list[bytes] = []
         voices: list[str] = []
