@@ -46,7 +46,7 @@
 |---|---|---|
 | `SCORING_PROVIDER` | `fake` | `fake` / `azure` / `iflytek` |
 | `SCORING_FALLBACK_PROVIDERS` | `` | 逗号分隔，按序回退 |
-| `TTS_PROVIDER` | `fake` | `fake` / `azure` / `google` / `elevenlabs` |
+| `TTS_PROVIDER` | `fake` | `fake` / `azure`。Google 与 ElevenLabs 没有高棉语 TTS，不实现（D-125） |
 | `LLM_PROVIDER` | `fake` | `fake` / `openai` |
 | `LLM_MODEL` | `gpt-4.1-mini` | 只在 provider 非 fake 时读。PRD 第 8 节定的是**档位**不是名字——名字变得比档位快 |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | 任何 OpenAI 兼容端点。适配器走 HTTP 而不是厂商 SDK，就是为了让换供应商是改这一行而不是重写 |
@@ -162,6 +162,9 @@
 | `PIPELINE_MAX_CHARS_HSK3` | `18` | |
 | `TTS_SPEAKING_RATE_ZH` | `0.9` | |
 | `TTS_SPEAKING_RATE_KM` | `1.0` | |
+| `TTS_VOICE_KM_NARRATOR` | `km-KH-SreymomNeural` | 高棉语讲解用哪个厂商音色。**暂定**，等 M0-2 盲评结果（D-137）；改了要重新打包 |
+| `TTS_VOICE_KM_FEEDBACK` | `km-KH-SreymomNeural` | 高棉语反馈短句的音色，暂与讲解相同 |
+| `TTS_VOICE_ZH_MODEL` | `zh-CN-XiaoxiaoNeural` | 中文示范朗读，PRD 6.3「zh-CN 标准女声」 |
 
 ## 8. 实验（A/B）
 

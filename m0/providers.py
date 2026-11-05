@@ -1,9 +1,9 @@
 """Where the M0 scripts get their providers, and where their spending is written.
 
-**Providers.** ``azure`` resolves to the verification adapters in
-``m0.azure``; every other name goes to the application registries untouched.
-So ``fake`` behaves exactly as it does everywhere else, and ``app/services/``
-never learns that a real implementation exists (D-126).
+**Providers.** TTS comes from the application registry, Azure included, since
+E8 moved it there (D-137). Scoring's ``azure`` still resolves to the
+verification adapter in ``m0.azure`` until E9 moves that too (D-126); every
+other name goes to the application registries untouched.
 
 **Spending.** CLAUDE.md section 8: a call that is not in ``cost_ledger`` did
 not happen. A billed run therefore opens the ledger *before* its first
@@ -35,7 +35,7 @@ from app.services.scoring import registry as scoring_registry
 from app.services.scoring.base import Language, PronunciationScorer
 from app.services.tts import registry as tts_registry
 from app.services.tts.base import TTSProvider, Voice
-from m0.azure import AzureScorer, AzureTTS
+from m0.azure import AzureScorer
 
 LEDGER_REF: Final[LedgerRef] = "content_production"
 
@@ -43,9 +43,8 @@ LEDGER_REF: Final[LedgerRef] = "content_production"
 def build_tts(
     name: str, *, settings: Settings, voices: Mapping[Voice, str] | None = None
 ) -> TTSProvider:
-    if name == AzureTTS.name:
-        return AzureTTS.from_settings(settings, voices=voices)
-    return tts_registry.build_tts(name, voices=voices)
+    # Azure TTS is in the application registry now (E8, D-137).
+    return tts_registry.build_tts(name, settings=settings, voices=voices)
 
 
 def get_scorer(language: Language, *, settings: Settings) -> PronunciationScorer:

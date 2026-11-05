@@ -19,9 +19,10 @@ import pytest
 from app.services.cost_ledger import LedgerRef, PendingEntry
 from app.services.scoring.base import Language
 from app.services.scoring.fake import FakeScorer
+from app.services.tts.azure import AzureTTS
 from app.services.tts.base import Voice
 from app.services.tts.fake import FakeTTS
-from m0.azure import AzureScorer, AzureTTS
+from m0.azure import AzureScorer
 from m0.providers import (
     LEDGER_REF,
     LedgerUnavailableError,
@@ -155,7 +156,7 @@ def _refuse_requests(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("a request was made")
 
     monkeypatch.setattr("m0.azure.scoring.post", refuse)
-    monkeypatch.setattr("m0.azure.tts.post", refuse)
+    monkeypatch.setattr("app.services.tts.azure.post", refuse)
 
 
 def test_scoring_stops_before_any_request_when_the_ledger_is_down(

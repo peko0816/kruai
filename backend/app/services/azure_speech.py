@@ -1,4 +1,9 @@
-"""The one HTTP call both Azure adapters make, and what can go wrong with it.
+"""The one HTTP call every Azure Speech adapter makes, and what can go wrong with it.
+
+Moved here from m0/ when E8 landed (D-137): TTS uses it now, and E9's scorer
+will. PRD 15.2 asks for one client layer with retries and timeouts per vendor;
+this is that layer for Azure Speech. Cost is recorded by the caller, against
+the figure each adapter reports.
 
 REST rather than the Speech SDK: the SDK is a native library with its own
 audio stack, and two verification scripts that send a few dozen requests in
