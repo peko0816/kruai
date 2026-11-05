@@ -10,7 +10,7 @@
 | B Provider 抽象与 Fake | 7 | 7 | G-B 通过；B7 为计划外 |
 | C 领域层 | 7 | 7 | G-C 通过 |
 | D API 与 Bot | 12 | 10 | D9 等 M0-3，D11 等产品决策 |
-| **E 内容管线** | **10** | **8** | **E1–E7 + E10 完成，HSK1 已生成并校验。E8/E9 提前做（已获批）** |
+| **E 内容管线** | **10** | **8** | **E1–E7 + E10 完成，HSK1 已生成并校验。E8 代码已落地（#80），E9 下一个** |
 | **Q 部署前质量修复** | **7** | **7** | **交叉验证发现（D-130），体验测试前完成** |
 | F M3 实时语音 | 6 | 0 | G-D 之后 |
 | G M4 B 端 | 5 | 0 | G-D 之后 |
@@ -153,7 +153,7 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 | E5 | ✅ #42 #53 #61 #62 | `review_export.py`：10% 抽样导 CSV | E4 | 抽样比例可配置，输出可直接给母语者 |
 | E6 | ✅ #43 #56 | `build_pack.py`：固化 JSON + 调 TTS 预生成音频；`--with-video` 开关（默认关，S2 前不实现视频分支） | B2 E4 | FakeTTS 下产出完整 pack |
 | E7 | ✅ #44 #56 | `import_pack.py`：入库 + 上传对象存储 + 校验 sources/licence 非空 | A4 E6 | 空库导入 + 一致性校验通过；sources 为空则拒绝 |
-| E8 | ⏸ M0-2 | `[BLOCKED-M0]` 真实 TTS adapter（按 M0-2 结论） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
+| E8 | ◐ #80（代码；整包生成待执行，复听待盲评） | 真实 TTS adapter：Azure，提前于 M0-2 落地，音色走配置（D-137） | E6 + M0-2 | 高棉语音频可生成并通过母语者复听 |
 | E10 | ✅ #52 | `repair.py`（stage 4b）：只重问 validate.py 驳回的 concept，违规原文进 prompt，逐 concept 保留违规更少的那一版。**计划外条目**：原计划 generate 与 validate 之间没有东西，一份有违规的 draft 只能整体重生成（D-110） | E3 E4 | 实测 186 → 78；绝不让某个 concept 变差 |
 | E9 | ⏸ M0-1 | `[BLOCKED-M0]` 真实 scoring adapter（按 M0-1 结论）+ `scoring/zh_tone.py` | B1 + M0-1 | 按 `ZH_TONE_MODE` 结论实现解析或推导；真人样本区分度达标 |
 

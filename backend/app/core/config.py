@@ -317,6 +317,13 @@ class Settings(BaseSettings):
     pipeline_max_chars_hsk3: int = Field(default=18, gt=0)
     tts_speaking_rate_zh: float = Field(default=0.9, gt=0.0)
     tts_speaking_rate_km: float = Field(default=1.0, gt=0.0)
+    #: Which vendor voice reads each logical voice (D-137). Provisional until
+    #: M0-2's blind test returns: the female Khmer voice for both Khmer roles,
+    #: Azure's standard female Mandarin for the model sentences (PRD 6.3).
+    #: Changing one is a settings change and a pack rebuild.
+    tts_voice_km_narrator: str = "km-KH-SreymomNeural"
+    tts_voice_km_feedback: str = "km-KH-SreymomNeural"
+    tts_voice_zh_model: str = "zh-CN-XiaoxiaoNeural"
 
     # ------------------------------------------------------------- 8. 实验 (A/B)
     experiment_explain_media_enabled: bool = False

@@ -3257,3 +3257,28 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 影响范围：`interfaces/scoring_base.py`、`services/scoring/{base,fake}.py`、`services/cost_ledger.py`、
   `services/entitlements/cost_guard.py`、`api/v1/{attempts,admin}.py`、`models/commerce.py`、
   `alembic/versions/b3c1d2e4f5a6_*`、`docs/DATA_MODEL.sql`、`m0/`、`CLAUDE.md`（R4）、`docs/CONFIG_REFERENCE.md`。
+
+## D-137 E8 提前：Azure TTS 搬进 `app/services`，音色是配置，等盲评结果再换
+
+- 日期：2026-11-05（项目所有者批准 E8、E9 在 M0 出结论前提前做，以便部署体验测试）
+- 背景：CLAUDE.md 第 3 节在 M0 出结论前不做真实 provider 实现；D-126 因此把 Azure 适配器放在 `m0/`。
+  母语者的盲评要滞后，而体验测试需要真实的高棉语与中文音频。
+- 选择：
+  1. **`m0/azure/tts.py` → `app/services/tts/azure.py`，`m0/azure/transport.py` → `app/services/azure_speech.py`**
+     （`git mv`，历史跟着走）。测试一并搬到 `backend/tests/unit/`；评分适配器留在 `m0/`，等 E9。
+     `azure_speech.py` 就是 PRD 15.2「统一 client 层，带重试、超时」在 Azure Speech 这一家的落点。
+  2. **音色是配置**：`TTS_VOICE_KM_NARRATOR` / `TTS_VOICE_KM_FEEDBACK` / `TTS_VOICE_ZH_MODEL`，
+     暂定高棉语两项都是女声 Sreymom、中文是 Xiaoxiao（PRD 6.3「zh-CN 标准女声」）。
+     **盲评结果回来改配置、重新打包即可，不改代码。** 构造函数仍接受映射，盲评按候选音色各建一次。
+  3. **TTS 注册表的工厂改为接收 settings**（与 LLM 注册表一致）：真实厂商需要 key 与区域。
+     没配 key 时构造即报配置错误，启动自检据此拒绝启动，而不是打包打到一半才失败。
+  4. 没有高棉语 TTS 的厂商（Google、ElevenLabs）不实现（D-125），CONFIG_REFERENCE 已改。
+- **已知的低估**：TTS 成本沿用 FakeTTS 的口径——**逐次向下取整到美分**（一句话约 0.1 美分 → 记 0）。
+  整套 HSK1 约 2.8 万字符，按标价约 0.4 美元，账上会记接近 0。这是内容生产成本，不进每用户护栏，
+  免费档 F0 实际也不收费；要准确记，需要像 D-136 那样改 TTS 的规范接口，等有必要时再提。
+- **还没做**：真正调用 Azure 生成整套音频。那是一次计费调用（F0 免费，但按第 6 节先问），
+  合并后经项目所有者同意再执行；之后才谈得上 E8 的验收「母语者复听」。
+- 回退成本：低。`TTS_PROVIDER=fake` 即回到原状。
+- 影响范围：`app/services/{azure_speech.py, tts/azure.py, tts/registry.py}`、`core/config.py`、
+  `m0/{azure,providers.py,tests}`、`backend/tests/unit/{test_tts_azure,test_azure_speech,azure_recorder,test_tts_registry,test_selfcheck}.py`、
+  `docs/CONFIG_REFERENCE.md`、`.env.example`。

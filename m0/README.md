@@ -188,17 +188,16 @@ E8 读那张表；表没填，`TTS_PROVIDER` 就没有东西可以解析逻辑�
 
 # Azure 验证实现（`m0/azure/`）
 
-两个脚本里 `azure` 这个名字解析到 `m0/azure/`，**不在 `app/services/`**（D-126）：
-CLAUDE.md 第 3 节在 M0 出结论前不允许真实 provider 实现，而 M0 要出结论就得调 Azure。
-`fake` 照旧走应用自己的 registry，行为与运行时完全一致。
+**TTS 已搬进 `app/services/tts/azure.py`**（E8 提前，D-137），盲评脚本直接用应用的注册表；
+HTTP 层也搬到了 `app/services/azure_speech.py`。**评分仍在 `m0/azure/`**（D-126），等 E9 再搬。
 
 | | |
 |---|---|
 | 资源 | `ai-tutor-speech`，区域 `eastasia`，免费档 F0 |
 | 走的接口 | REST（不是 Speech SDK）：TTS 用 `cognitiveservices/v1` + SSML；评测用短音频识别端点 + `Pronunciation-Assessment` 头 |
 | 限流 | F0 每分钟约 20 次。遇到 429 按 `Retry-After` 等，最多试 3 次 |
-| 成本 | F0 实际不收费；记账按标价估：TTS $15／百万字符（逐条向下取整）、评测按 $2／小时上限（逐条向上取整） |
+| 成本 | F0 实际不收费；记账按标价估：TTS $15／百万字符（逐条向下取整）、评测按 $2／小时上限，记到千分之一美分（D-136） |
 | **没验证过的** | 评测返回的 JSON 结构只对着微软文档写过，两种文档写法都能读；读不懂时报 `scoring.malformed_response` 并把原文留在 `raw`。**第一次真实调用要有人盯着** |
 
-M0 出结论后，留下的那个按 E8 / E9 搬进 `app/services/`，各加一行 registry；这个目录随之删除。
+E9 搬走评分之后，这个目录随之删除。
 

@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from app.core.config import Settings
+from app.services.provider_errors import ProviderConfigurationError
 from app.services.tts import get_tts, speaking_rate_for
 from app.services.tts import registry as tts_registry
 from app.services.tts.base import SynthesisResult, TTSProvider, Voice
@@ -67,7 +68,7 @@ class ChineseOnlyTTS(TTSProvider):
 
 @pytest.fixture
 def zh_only_registered(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(tts_registry._FACTORIES, "zh-only", ChineseOnlyTTS)
+    monkeypatch.setitem(tts_registry._FACTORIES, "zh-only", lambda _s, _v: ChineseOnlyTTS())
 
 
 # ------------------------------------------------------------- default wiring
@@ -91,13 +92,14 @@ def test_fake_is_registered() -> None:
 
 
 def test_unknown_provider_names_the_typo_and_the_alternatives() -> None:
-    with pytest.raises(ValueError, match="unknown tts provider 'azure'"):
-        get_tts(Voice.ZH_MODEL, settings=settings(TTS_PROVIDER="azure"))
+    """ElevenLabs has no Khmer TTS and is not implemented (D-125)."""
+    with pytest.raises(ValueError, match="unknown tts provider 'elevenlabs'"):
+        get_tts(Voice.ZH_MODEL, settings=settings(TTS_PROVIDER="elevenlabs"))
 
 
 def test_error_message_lists_what_is_implemented() -> None:
-    with pytest.raises(ValueError, match=r"implemented: \['fake'\]"):
-        build_tts("nope")
+    with pytest.raises(ValueError, match=r"implemented: \['azure', 'fake'\]"):
+        build_tts("nope", settings=settings())
 
 
 @pytest.mark.usefixtures("zh_only_registered")
@@ -134,3 +136,50 @@ def test_rates_come_from_configuration_not_constants() -> None:
     configured = settings(TTS_SPEAKING_RATE_ZH="0.75", TTS_SPEAKING_RATE_KM="1.1")
     assert speaking_rate_for(Voice.ZH_MODEL, settings=configured) == 0.75
     assert speaking_rate_for(Voice.KM_NARRATOR, settings=configured) == 1.1
+
+
+# ------------------------------------------------------------------- azure (E8)
+
+
+def test_azure_is_registered_and_reads_its_voices_from_settings() -> None:
+    """The blind test's verdict is a settings change, not a code change (D-137)."""
+    from app.services.tts.azure import AzureTTS
+
+    configured = settings(
+        TTS_PROVIDER="azure",
+        AZURE_SPEECH_KEY="k",
+        AZURE_SPEECH_REGION="eastasia",
+        TTS_VOICE_KM_NARRATOR="km-KH-PisethNeural",
+    )
+
+    provider = get_tts(Voice.KM_NARRATOR, settings=configured)
+
+    assert isinstance(provider, AzureTTS)
+    assert provider.available_voices()[Voice.KM_NARRATOR] == "km-KH-PisethNeural"
+    assert provider.available_voices()[Voice.ZH_MODEL] == "zh-CN-XiaoxiaoNeural"
+
+
+def test_a_pinned_voice_overrides_the_configured_one() -> None:
+    """How the blind test builds one provider per candidate."""
+    configured = settings(AZURE_SPEECH_KEY="k", AZURE_SPEECH_REGION="eastasia")
+
+    provider = build_tts(
+        "azure", settings=configured, voices={Voice.KM_NARRATOR: "km-KH-PisethNeural"}
+    )
+
+    assert provider.available_voices()[Voice.KM_NARRATOR] == "km-KH-PisethNeural"
+    assert provider.available_voices()[Voice.KM_FEEDBACK] == "km-KH-SreymomNeural"
+
+
+def test_azure_without_a_key_is_a_configuration_error() -> None:
+    """So the startup self-check refuses to boot rather than a pack build failing later."""
+    with pytest.raises(ProviderConfigurationError, match="AZURE_SPEECH_KEY"):
+        get_tts(Voice.KM_NARRATOR, settings=settings(TTS_PROVIDER="azure"))
+
+
+def test_azure_offers_no_english_voice_yet() -> None:
+    """EN_MODEL is v2; an English pack build stops at once rather than reading in Khmer."""
+    configured = settings(TTS_PROVIDER="azure", AZURE_SPEECH_KEY="k", AZURE_SPEECH_REGION="r")
+
+    with pytest.raises(ProviderConfigurationError, match="en_model"):
+        get_tts(Voice.EN_MODEL, settings=configured)

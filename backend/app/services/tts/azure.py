@@ -1,10 +1,18 @@
-"""Azure neural TTS behind the normative ``TTSProvider``, for M0-2.
+"""Azure neural TTS behind the normative ``TTSProvider`` (BACKLOG E8).
+
+Moved from m0/ ahead of M0-2's verdict, with the owner's approval (D-137): the
+trial needs real audio before the native speakers have scored the voices.
 
 Khmer has exactly two Azure voices, ``km-KH-SreymomNeural`` and
 ``km-KH-PisethNeural`` (both GA in eastasia, checked against the live voice
-list on 2026-10-24). The blind test exists to choose between them, so the
-mapping from logical voice to vendor voice is a constructor argument rather
-than a constant: the same class is built once per candidate.
+list on 2026-10-24). Which one reads what is configuration —
+TTS_VOICE_KM_NARRATOR, TTS_VOICE_KM_FEEDBACK, TTS_VOICE_ZH_MODEL — so the
+blind test's verdict is a settings change and a rebuild, not a code change.
+The constructor still takes a mapping, because the blind test builds this
+class once per candidate voice.
+
+Build time only, like every TTS provider (tts/base.py): nothing in a request
+path may call it.
 """
 
 from __future__ import annotations
@@ -17,19 +25,9 @@ from xml.sax.saxutils import escape, quoteattr
 import httpx
 
 from app.core.config import Settings
+from app.services.azure_speech import Sleep, post
 from app.services.provider_errors import ProviderConfigurationError
 from app.services.tts.base import SynthesisResult, TTSProvider, Voice
-from m0.azure.transport import Sleep, post
-
-#: What a logical voice resolves to when nobody pinned one. Khmer feedback
-#: shares the narrator until M0-2 says otherwise (base.py allows "same
-#: source"). EN_MODEL is v2 and is left out, which is how base.py says a
-#: voice is not offered.
-DEFAULT_VOICES: Final[Mapping[Voice, str]] = {
-    Voice.KM_NARRATOR: "km-KH-SreymomNeural",
-    Voice.KM_FEEDBACK: "km-KH-SreymomNeural",
-    Voice.ZH_MODEL: "zh-CN-XiaoxiaoNeural",
-}
 
 #: Constant bit rate, so the duration can be read off the byte count: at
 #: 48 kbit/s every millisecond is 48 bits. The same reasoning as FakeTTS's
@@ -76,7 +74,7 @@ class AzureTTS(TTSProvider):
         *,
         key: str,
         region: str,
-        voices: Mapping[Voice, str] | None = None,
+        voices: Mapping[Voice, str],
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
@@ -92,7 +90,7 @@ class AzureTTS(TTSProvider):
             )
         self._key = key
         self._url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
-        self._voices = {**DEFAULT_VOICES, **(voices or {})}
+        self._voices = dict(voices)
         self._transport = transport
         self._sleep = sleep
 
@@ -100,10 +98,20 @@ class AzureTTS(TTSProvider):
     def from_settings(
         cls, settings: Settings, *, voices: Mapping[Voice, str] | None = None
     ) -> AzureTTS:
+        """The configured voices, with ``voices`` overriding any of them.
+
+        EN_MODEL is v2 and has no setting, which is how base.py says a voice
+        is not offered.
+        """
+        configured = {
+            Voice.KM_NARRATOR: settings.tts_voice_km_narrator,
+            Voice.KM_FEEDBACK: settings.tts_voice_km_feedback,
+            Voice.ZH_MODEL: settings.tts_voice_zh_model,
+        }
         return cls(
             key=settings.azure_speech_key.get_secret_value(),
             region=settings.azure_speech_region,
-            voices=voices,
+            voices={**configured, **(voices or {})},
         )
 
     def available_voices(self) -> dict[Voice, str]:
@@ -168,4 +176,4 @@ def _failure(code: str, message: str, *, cost: int = 0) -> SynthesisResult:
     return SynthesisResult(ok=False, error_code=code, error_message=message, cost_usd_cents=cost)
 
 
-__all__ = ["DEFAULT_VOICES", "AzureTTS", "ssml"]
+__all__ = ["AzureTTS", "ssml"]

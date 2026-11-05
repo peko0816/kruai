@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping
 
 from app.core.config import Settings
 from app.services.provider_errors import ProviderConfigurationError
+from app.services.tts.azure import AzureTTS
 from app.services.tts.base import TTSProvider, Voice
 from app.services.tts.fake import FakeTTS
 
@@ -25,8 +26,11 @@ from app.services.tts.fake import FakeTTS
 #: has to compare two vendor voices for the same logical voice — the same
 #: vendor, built twice with different mappings. Without this the only way to
 #: hear a second voice is a second vendor, and only one vendor has Khmer.
-_FACTORIES: dict[str, Callable[..., TTSProvider]] = {
-    "fake": FakeTTS,
+#: Each factory takes the settings — a real vendor needs its key and region,
+#: as llm/registry.py's do — and the optional voice override.
+_FACTORIES: dict[str, Callable[[Settings, Mapping[Voice, str] | None], TTSProvider]] = {
+    "fake": lambda _settings, voices: FakeTTS(voices=voices),
+    "azure": lambda settings, voices: AzureTTS.from_settings(settings, voices=voices),
 }
 
 
@@ -34,7 +38,9 @@ def available_providers() -> tuple[str, ...]:
     return tuple(sorted(_FACTORIES))
 
 
-def build_tts(name: str, *, voices: Mapping[Voice, str] | None = None) -> TTSProvider:
+def build_tts(
+    name: str, *, settings: Settings, voices: Mapping[Voice, str] | None = None
+) -> TTSProvider:
     """Instantiate one provider by name.
 
     ``voices`` overrides which vendor voice a logical voice resolves to. Left
@@ -51,7 +57,7 @@ def build_tts(name: str, *, voices: Mapping[Voice, str] | None = None) -> TTSPro
         raise ProviderConfigurationError(
             f"unknown tts provider {name!r}; implemented: {list(available_providers())}"
         )
-    return factory() if voices is None else factory(voices=dict(voices))
+    return factory(settings, None if voices is None else dict(voices))
 
 
 def get_tts(voice: Voice, *, settings: Settings) -> TTSProvider:
@@ -63,7 +69,7 @@ def get_tts(voice: Voice, *, settings: Settings) -> TTSProvider:
             silently substituting a different voice would ship a pack where the
             Khmer explanation is read in Chinese.
     """
-    provider = build_tts(settings.tts_provider)
+    provider = build_tts(settings.tts_provider, settings=settings)
     if voice not in provider.available_voices():
         raise ProviderConfigurationError(
             f"tts provider {provider.name!r} has no voice for {voice.value}; "

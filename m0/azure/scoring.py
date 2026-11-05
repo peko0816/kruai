@@ -31,6 +31,7 @@ from typing import Any, Final
 import httpx
 
 from app.core.config import Settings
+from app.services.azure_speech import Sleep, post
 from app.services.provider_errors import ProviderConfigurationError
 from app.services.scoring.base import (
     AssessMode,
@@ -40,7 +41,6 @@ from app.services.scoring.base import (
     PronunciationScorer,
     WordScore,
 )
-from m0.azure.transport import Sleep, post
 
 _SAMPLE_RATE: Final = 16_000
 _MAX_SECONDS: Final = 60.0

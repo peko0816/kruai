@@ -1,4 +1,8 @@
-"""Azure Speech, for the M0 verification scripts only.
+"""Azure Speech scoring, for the M0 verification scripts only.
+
+The TTS adapter and the HTTP layer moved to app/services/ when E8 landed
+ahead of M0-2 (D-137); the scorer follows with E9.
+
 
 CLAUDE.md section 3 rules out real provider implementations until M0 has
 concluded, and M0 cannot conclude without calling a real provider. D-125 and
@@ -10,6 +14,5 @@ registry entry each.
 """
 
 from m0.azure.scoring import AzureScorer
-from m0.azure.tts import AzureTTS
 
-__all__ = ["AzureScorer", "AzureTTS"]
+__all__ = ["AzureScorer"]

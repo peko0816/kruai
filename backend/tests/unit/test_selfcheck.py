@@ -106,7 +106,7 @@ def broken_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.tts import registry as tts_registry
 
     monkeypatch.setitem(scoring_registry._FACTORIES, "en-only", EnglishOnlyScorer)
-    monkeypatch.setitem(tts_registry._FACTORIES, "no-khmer", NoKhmerTTS)
+    monkeypatch.setitem(tts_registry._FACTORIES, "no-khmer", lambda _s, _v: NoKhmerTTS())
 
 
 # ------------------------------------------------------------- the happy path

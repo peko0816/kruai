@@ -415,8 +415,8 @@ def test_the_pinned_voice_reaches_the_provider(monkeypatch: pytest.MonkeyPatch) 
 
     built: list[FakeTTS] = []
 
-    def spy(**kwargs: Any) -> FakeTTS:
-        provider = FakeTTS(**kwargs)
+    def spy(_settings: Any, voices: Any) -> FakeTTS:
+        provider = FakeTTS(voices=voices)
         built.append(provider)
         return provider
 
