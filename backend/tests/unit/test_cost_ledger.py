@@ -18,7 +18,12 @@ from typing import Any, NoReturn
 import pytest
 
 from app.core.config import Settings
-from app.services.cost_ledger import CostLedger, PendingEntry, UnledgeredCallError
+from app.services.cost_ledger import (
+    CostLedger,
+    PendingEntry,
+    UnledgeredCallError,
+    millicents_to_cents,
+)
 
 _MINIMAL: dict[str, str] = {
     "DATABASE_URL": "postgresql+psycopg://u:p@localhost:5432/db",
@@ -154,3 +159,64 @@ def test_the_user_is_optional() -> None:
 def test_a_user_can_be_attached() -> None:
     user = uuid.uuid4()
     assert PendingEntry(provider="fake", ref="attempt", user_id=user).user_id == user
+
+
+# ------------------------------------------------------- below a cent (D-136)
+
+
+def test_a_cost_below_a_cent_is_kept_below_a_cent() -> None:
+    entry = PendingEntry(provider="azure", ref="attempt")
+
+    entry.record(unit="calls", quantity=1, cost_usd_millicents=111)
+
+    assert entry.costs[0].cost_usd_millicents == 111
+    assert entry.costs[0].cost_usd_cents == 1, "a single row still reads as a whole cent"
+
+
+def test_whole_cents_are_held_as_thousandths() -> None:
+    entry = PendingEntry(provider="openai", ref="content_production")
+
+    entry.record(unit="tokens", quantity=900, cost_usd_cents=3)
+
+    assert entry.costs[0].cost_usd_millicents == 3000
+
+
+def test_a_batch_is_summed_before_it_is_rounded() -> None:
+    """Three calls at 0.4 cents are 1.2 cents — two when rounded once, not
+    three. The tenfold overstatement came from rounding each row (D-136)."""
+    entry = PendingEntry(provider="azure", ref="attempt")
+    for _ in range(3):
+        entry.record(unit="calls", quantity=1, cost_usd_millicents=400)
+
+    assert entry.total_usd_millicents == 1200
+    assert entry.total_usd_cents == 2
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{}, {"cost_usd_cents": 1, "cost_usd_millicents": 1000}], ids=["neither", "both"]
+)
+def test_exactly_one_unit_is_given(kwargs: dict[str, int]) -> None:
+    with pytest.raises(TypeError, match="exactly one"):
+        PendingEntry(provider="azure", ref="attempt").record(unit="calls", quantity=1, **kwargs)
+
+
+@pytest.mark.parametrize("cost", [1.5, True, "100"])
+def test_thousandths_have_to_be_integers_too(cost: Any) -> None:
+    """R4 holds in either unit."""
+    with pytest.raises(TypeError):
+        PendingEntry(provider="azure", ref="attempt").record(
+            unit="calls", quantity=1, cost_usd_millicents=cost
+        )
+
+
+def test_negative_thousandths_are_refused() -> None:
+    with pytest.raises(ValueError):
+        PendingEntry(provider="azure", ref="attempt").record(
+            unit="calls", quantity=1, cost_usd_millicents=-1
+        )
+
+
+@pytest.mark.parametrize(("millicents", "cents"), [(0, 0), (1, 1), (999, 1), (1000, 1), (1001, 2)])
+def test_rounding_to_cents_goes_up(millicents: int, cents: int) -> None:
+    """Against us: the ceiling is checked against what was spent."""
+    assert millicents_to_cents(millicents) == cents

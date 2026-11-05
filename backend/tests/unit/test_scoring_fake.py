@@ -203,7 +203,7 @@ async def test_unscripted_with_reference_is_rejected() -> None:
 async def test_failures_carry_no_cost() -> None:
     """Nothing was assessed, so nothing should reach the cost ledger."""
     result = await score(audio=b"")
-    assert result.cost_usd_cents == 0
+    assert result.cost_usd_millicents == 0
 
 
 # -------------------------------------------------------------------- contract
@@ -212,7 +212,7 @@ async def test_failures_carry_no_cost() -> None:
 async def test_every_assessment_reports_a_cost() -> None:
     """A zero here would leave the ledger and its guardrails untestable."""
     result = await score()
-    assert result.cost_usd_cents > 0
+    assert result.cost_usd_millicents > 0
 
 
 async def test_raw_is_populated_but_holds_no_audio() -> None:

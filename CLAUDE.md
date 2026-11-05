@@ -22,7 +22,7 @@ KruAI：以高棉语为教学语言的中文口语陪练系统。一套引擎，
 | R1 | **运行时不得调用 LLM 生成课程内容**。课程是数据（content pack JSON），不是代码 | `app/api/` 与 `app/services/mastery/` 下不得出现 llm_client 调用 |
 | R2 | **M0 未决的外部能力一律走 Provider 抽象 + Fake 实现**，不得直接写死某家厂商 SDK | 见第 4 节 |
 | R3 | **阈值、权重、限额不得硬编码**，全部走配置 | 见 `docs/CONFIG_REFERENCE.md` |
-| R4 | **用户支付金额用 `amount_minor` + `currency_minor_units`（最小货币单位整数）**；内部成本核算用 `_usd_cents`。禁止 float/Decimal，禁止把 KHR 当作有小数位 | 类型注解 + 单测 |
+| R4 | **用户支付金额用 `amount_minor` + `currency_minor_units`（最小货币单位整数）**；内部成本核算用 `_usd_cents`，单次成本低于一美分的（发音评测）用 `_usd_millicents`（千分之一美分），汇总后再取整（D-136）。禁止 float/Decimal，禁止把 KHR 当作有小数位 | 类型注解 + 单测 |
 | R5 | **不得硬编码任何密钥**，全部经 pydantic-settings 从环境读取 | pre-commit 扫描 |
 | R6 | **PRD 第 14 节「非目标」不得实现**，包括"顺手加一下" | PR 自检 |
 | R7 | **PRD 第 5.5 节版权边界**：出版社教材不得进入管线，含改写与 LLM few-shot 示例 | content pack 的 `sources[]`/`licence` 非空校验 |

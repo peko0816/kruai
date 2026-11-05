@@ -204,11 +204,11 @@ async def test_wrapping_a_scorer_records_the_cost_it_reports(
             mode=AssessMode.SCRIPTED,
             reference_text="我要水",
         )
-        entry.record(unit="calls", quantity=1, cost_usd_cents=result.cost_usd_cents)
+        entry.record(unit="calls", quantity=1, cost_usd_millicents=result.cost_usd_millicents)
 
     written = await rows(engine)
     assert written[0].provider == "fake"
-    assert written[0].cost_usd_cents_est == result.cost_usd_cents
+    assert written[0].cost_usd_millicents_est == result.cost_usd_millicents
     assert written[0].cost_usd_cents_est > 0, "a scored attempt should cost something"
     await engine.dispose()
 
@@ -225,7 +225,7 @@ async def test_a_refused_assessment_is_recorded_as_free(
         result = await scorer.assess(
             b"", language=Language.ZH_CN, mode=AssessMode.SCRIPTED, reference_text="我要水"
         )
-        entry.record(unit="calls", quantity=1, cost_usd_cents=result.cost_usd_cents)
+        entry.record(unit="calls", quantity=1, cost_usd_millicents=result.cost_usd_millicents)
 
     assert result.ok is False
     written = await rows(engine)

@@ -245,8 +245,12 @@ CREATE TABLE cost_ledger (
     provider        TEXT NOT NULL,
     unit            TEXT NOT NULL,                    -- seconds / tokens / calls / minutes
     quantity        REAL NOT NULL,
-    cost_usd_cents_est  INTEGER NOT NULL,
-    ref             TEXT                              -- 'attempt' / 'realtime' / 'content_production' / 'payment'
+    cost_usd_cents_est  INTEGER NOT NULL,             -- 本行向上取整后的美分，仅供逐行阅读
+    ref             TEXT,                             -- 'attempt' / 'realtime' / 'content_production' / 'payment'
+    -- 千分之一美分的整数。所有汇总（成本护栏、/admin/costs）以它为准，最后才取整成美分：
+    -- 一次 4 秒评分约 0.11 美分，逐行按美分进位会把每用户成本高估约 10 倍（D-136）。
+    -- 列在最后，因为它是后加的：迁移的 ADD COLUMN 只能追加在末尾
+    cost_usd_millicents_est BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_cost_time ON cost_ledger(occurred_at DESC);
 CREATE INDEX idx_cost_user_month ON cost_ledger(user_id, occurred_at);

@@ -76,7 +76,7 @@ def scored(group: str, score: float | None, *, phonemes: tuple[str, ...] = ()) -
             pron_score=score,
             words=words,
             error_code=None if score is not None else "scoring.unavailable",
-            cost_usd_cents=1,
+            cost_usd_millicents=1000,
         ),
     )
 

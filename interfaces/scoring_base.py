@@ -72,8 +72,10 @@ class PronunciationResult:
     error_code: str | None = None
     error_message: str | None = None
 
-    #: 本次调用的估算成本（USD 美分整数）。调用方据此写 cost_ledger。
-    cost_usd_cents: int = 0
+    #: 本次调用的估算成本（USD 千分之一美分的整数）。调用方据此写 cost_ledger。
+    #: 用千分之一美分而非美分：一次 4 秒评测约 0.11 美分，按美分报会逐次进位，
+    #: 把每用户月成本高估约 10 倍（D-136，经项目所有者批准修改本规范文件）。
+    cost_usd_millicents: int = 0
 
 
 class PronunciationScorer(ABC):
@@ -82,7 +84,7 @@ class PronunciationScorer(ABC):
     实现类必须保证：
       1. 不抛异常 —— 所有失败以 ok=False + error_code 返回
       2. 幂等 —— 同一音频同一参数多次调用结果一致
-      3. 自报成本 —— cost_usd_cents 必填，未知时保守高估
+      3. 自报成本 —— cost_usd_millicents 必填，未知时保守高估
     """
 
     #: provider 标识，写入 cost_ledger.provider

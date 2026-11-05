@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from app.core.config import Settings, get_settings
+from app.services.cost_ledger import millicents_to_cents
 from app.services.provider_errors import ProviderConfigurationError
 from app.services.scoring.base import AssessMode, Language, PronunciationResult
 from m0.providers import (
@@ -173,7 +174,7 @@ async def score_all(
                 reference_text=sample.reference_text,
                 audio_format=sample.audio_format,
             )
-            entry.record(unit="calls", quantity=1, cost_usd_cents=result.cost_usd_cents)
+            entry.record(unit="calls", quantity=1, cost_usd_millicents=result.cost_usd_millicents)
         scored.append(Scored(sample=sample, result=result))
     return scored
 
@@ -249,7 +250,8 @@ class Report:
 
     @property
     def cost_usd_cents(self) -> int:
-        return sum(s.result.cost_usd_cents for s in self.scored)
+        """Summed in thousandths and rounded once, as the ledger does (D-136)."""
+        return millicents_to_cents(sum(s.result.cost_usd_millicents for s in self.scored))
 
     @property
     def verdicts(self) -> list[tuple[str, bool, str]]:

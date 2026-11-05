@@ -413,7 +413,7 @@ async def test_a_good_recording_is_sent_and_scored() -> None:
     assert request.url.params["language"] == "zh-CN"
     assert request.headers["Content-Type"] == "audio/wav; codecs=audio/pcm; samplerate=16000"
     assert result.ok
-    assert result.cost_usd_cents == 1
+    assert result.cost_usd_millicents == 167, "3 s at $2 an hour, in thousandths of a cent"
 
 
 @pytest.mark.parametrize(
@@ -444,7 +444,7 @@ async def test_audio_azure_would_refuse_is_refused_here_for_free(
     )
 
     assert result.error_code == code
-    assert result.cost_usd_cents == 0
+    assert result.cost_usd_millicents == 0
     assert recorder.requests == []
 
 
@@ -473,9 +473,9 @@ async def test_unscripted_and_missing_reference_are_refused() -> None:
 
 def test_scoring_cost_rounds_up_and_assumes_the_worst_when_unknown() -> None:
     """base.py: conservatively overestimate when the real figure is unknown."""
-    assert estimate_cost(0.5) == 1
-    assert estimate_cost(18) == 1
-    assert estimate_cost(19) == 2
+    assert estimate_cost(0.5) == 28
+    assert estimate_cost(18) == 1000
+    assert estimate_cost(19) == 1056
     assert estimate_cost(None) == estimate_cost(60)
 
 

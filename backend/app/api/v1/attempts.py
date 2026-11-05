@@ -311,7 +311,7 @@ async def create_attempt(
         concept_id=str(target.item.concept_id) if target.item.concept_id else None,
         pron_score=pron_score,
         passed=passed,
-        cost_usd_cents=result.cost_usd_cents,
+        cost_usd_millicents=result.cost_usd_millicents,
         mastery=None if mastery is None else mastery[0].current,
     )
 
@@ -514,7 +514,7 @@ async def _assess(
             mode=target.mode,
             reference_text=target.reference_text,
         )
-        entry.record(unit="calls", quantity=1, cost_usd_cents=result.cost_usd_cents)
+        entry.record(unit="calls", quantity=1, cost_usd_millicents=result.cost_usd_millicents)
     return result
 
 
