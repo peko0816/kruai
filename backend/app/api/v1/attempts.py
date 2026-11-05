@@ -53,9 +53,9 @@ from app.services.entitlements import (
     Entitlements,
     QuotaReset,
     alert_threshold_usd_cents,
-    current_plan,
     is_over_threshold,
     monthly_spend_usd_cents,
+    standing,
 )
 from app.services.mastery import (
     INITIAL_INTERVAL_DAYS,
@@ -226,8 +226,11 @@ async def create_attempt(
     target = await _load_target(session, lesson_item_id)
     payload = await _read_audio(audio, settings=settings)
 
-    plan = await current_plan(session, user_id)
-    await _guard_cost(session, user_id=user_id, plan=plan, settings=settings, now=now)
+    learner = await standing(session, user_id, settings=settings)
+    plan = learner.plan
+    await _guard_cost(
+        session, user_id=user_id, plan=plan, trial=learner.trial, settings=settings, now=now
+    )
     timezone = await _timezone_of(session, user_id)
 
     # Every read above is done. Hand the connection back before anything that
@@ -373,6 +376,7 @@ async def _guard_cost(
     *,
     user_id: uuid.UUID,
     plan: Plan,
+    trial: bool,
     settings: Settings,
     now: datetime.datetime,
 ) -> None:
@@ -387,10 +391,10 @@ async def _guard_cost(
         CostCapReached: past the plan's alert threshold for this month.
     """
     spend = await monthly_spend_usd_cents(session, user_id=user_id, now=now)
-    if not is_over_threshold(spend, plan=plan, settings=settings):
+    if not is_over_threshold(spend, plan=plan, settings=settings, trial=trial):
         return
 
-    threshold = alert_threshold_usd_cents(plan, settings=settings)
+    threshold = alert_threshold_usd_cents(plan, settings=settings, trial=trial)
     # The alert half of PRD 11.3. Error rather than warning: a learner costing
     # half again what their plan allows is either a pricing problem or an
     # abuse, and both want somebody to look.
@@ -400,6 +404,7 @@ async def _guard_cost(
         plan=plan,
         spend_usd_cents=spend,
         threshold_usd_cents=threshold,
+        trial=trial,
         cap_usd_cents=settings.monthly_cost_cap_usd_cents(plan),
     )
     raise CostCapReached(plan=plan, spend_usd_cents=spend, threshold_usd_cents=threshold)

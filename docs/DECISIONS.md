@@ -3106,3 +3106,25 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   `bot/api_client.py`、`backend/tests/integration/test_pipeline_to_bot.py`（新增）、
   `backend/tests/integration/test_bot_conversation.py`、`bot/tests/test_step_text.py`（新增）。
   **已导入的内容包需要重新导入**（D-098：发新版本）。
+
+## D-131 试运营测试者白名单：名单内按 Basic，成本上限单独配置且默认不放宽
+
+- 日期：2026-11-05（项目所有者选定方案 A）
+- 背景：交叉验证（D-130）发现，一课有 23 次录音，而免费档每天 3 次（D-074），支付又是关的（D-100）。
+  试运营时测试者录到第 3 次就卡住，也没有升级的途径——测出来的是付费墙，不是课程。
+- 选择：
+  1. **`TRIAL_TELEGRAM_IDS`**（逗号分隔，默认空）。名单内的人在 `entitlements.standing()` 里被**抬到 Basic**：
+     不限录音、不限每日课数。只改这一处，所有调用方（录音、开课、完课、`/me/entitlements`）看到的档位都一致。
+  2. **按请求读名单，不写进 token**：把人移出名单立即生效（与 D-025 同一理由）。
+  3. **成本上限单独一个键 `COST_CAP_TRIAL_USD_CENTS_MONTHLY`，默认等于 Basic（45）**：
+     把人加进名单**不会自动放宽花钱**。放宽到多少属于 CLAUDE.md 第 6 节「花钱的」，由项目所有者定，部署时填。
+  4. **名单为空时一切与现在完全一致**：正式版免费档的体验不受影响。
+- 为什么不直接调高免费档：那样测不到正式版免费档的真实体验，而且改的是全体用户的规则。
+- **一并发现、尚未解决的问题（要在 E9 接入真实评分前定）**：评分成本按**每次调用向上取整到 1 美分**记账
+  （`scoring/base.py`：「未知时保守高估」）。一段 4 秒录音的实际成本约 0.1 美分，取整后高估约 9 倍。
+  按 D-070 的护栏，Basic 用户（上限 45 美分 × 1.5）**每月约 68 次录音就会被限流**——不到三课。
+  Fake 评分同样记 1 美分。可选方向：按月汇总时长再折算、或账本改用更细的单位；两者都涉及金额口径，
+  需要项目所有者决定。
+- 回退成本：低。清空名单即回到原状。
+- 影响范围：`core/config.py`、`services/entitlements/{plan,cost_guard}.py`、
+  `api/v1/{attempts,lessons,me}.py`、`docs/CONFIG_REFERENCE.md`、`.env.example`。

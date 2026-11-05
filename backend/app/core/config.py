@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     #: operator knows theirs before the deployment exists, and a uuid is
     #: generated per environment.
     admin_telegram_ids: Annotated[tuple[int, ...], NoDecode] = ()
+    #: Telegram ids of trial testers, who are treated as Basic whatever their
+    #: subscriptions say and are throttled at COST_CAP_TRIAL_USD_CENTS_MONTHLY
+    #: instead of their plan's cap (D-131). Empty by default, which changes
+    #: nothing: the Free plan a stranger gets is exactly the one that ships.
+    trial_telegram_ids: Annotated[tuple[int, ...], NoDecode] = ()
 
     # ------------------------------------------------------------------ 1c. Bot
     #: Where the bot reaches the API. It is a separate process talking HTTP,
@@ -236,6 +241,10 @@ class Settings(BaseSettings):
     cost_cap_free_usd_cents_monthly: int = Field(default=15, ge=0)
     cost_cap_basic_usd_cents_monthly: int = Field(default=45, ge=0)
     cost_cap_pro_usd_cents_monthly: int = Field(default=230, ge=0)
+    #: [$] What a trial tester may cost a month before the guard throttles them.
+    #: Defaults to the Basic cap, so listing someone as a tester relaxes nothing
+    #: about money until somebody chooses a number (CLAUDE.md section 6).
+    cost_cap_trial_usd_cents_monthly: int = Field(default=45, ge=0)
     #: Must stay true in dev and CI: an unledgered external call should raise.
     cost_ledger_required: bool = True
 
@@ -325,6 +334,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "admin_telegram_ids",
+        "trial_telegram_ids",
         "scoring_fallback_providers",
         "payment_providers",
         "subscription_auto_charge_retry_days",

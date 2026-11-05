@@ -49,21 +49,28 @@ def scaled_multiplier(settings: Settings) -> int:
     return round(settings.cost_alert_multiplier * _SCALE)
 
 
-def alert_threshold_usd_cents(plan: Plan, *, settings: Settings) -> int:
+def alert_threshold_usd_cents(plan: Plan, *, settings: Settings, trial: bool = False) -> int:
     """The spend at which a learner on this plan is throttled.
 
     Rounded up: the rule is "past 1.5 times the cap", and with a cap of 45 that
-    is past 67.5 — which the integers reach at 68, not at 67.
+    is past 67.5 — which the integers reach at 68, not at 67. A trial tester is
+    measured against COST_CAP_TRIAL_USD_CENTS_MONTHLY instead (D-131).
     """
-    cap = settings.monthly_cost_cap_usd_cents(plan)
+    cap = (
+        settings.cost_cap_trial_usd_cents_monthly
+        if trial
+        else settings.monthly_cost_cap_usd_cents(plan)
+    )
     product = cap * scaled_multiplier(settings)
     # Ceiling division on integers. -(-a // b) avoids float entirely.
     return -(-product // _SCALE)
 
 
-def is_over_threshold(spend_usd_cents: int, *, plan: Plan, settings: Settings) -> bool:
-    """Whether this learner has spent past their plan's alert threshold."""
-    return spend_usd_cents >= alert_threshold_usd_cents(plan, settings=settings)
+def is_over_threshold(
+    spend_usd_cents: int, *, plan: Plan, settings: Settings, trial: bool = False
+) -> bool:
+    """Whether this learner has spent past their alert threshold."""
+    return spend_usd_cents >= alert_threshold_usd_cents(plan, settings=settings, trial=trial)
 
 
 def month_start(now: datetime.datetime) -> datetime.datetime:

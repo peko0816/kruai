@@ -21,8 +21,10 @@ from app.services.entitlements.cost_guard import (
 from app.services.entitlements.plan import (
     ENTITLING_STATUSES,
     FREE_PLAN,
+    Standing,
     best_plan,
     current_plan,
+    standing,
 )
 from app.services.entitlements.quota import (
     UNLIMITED,
@@ -48,6 +50,7 @@ __all__ = [
     "QuotaReset",
     "QuotaSnapshot",
     "ResetOutcome",
+    "Standing",
     "alert_threshold_usd_cents",
     "best_plan",
     "current_plan",
@@ -56,4 +59,5 @@ __all__ = [
     "month_start",
     "monthly_spend_usd_cents",
     "next_reset_at",
+    "standing",
 ]
