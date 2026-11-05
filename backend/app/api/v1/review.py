@@ -13,6 +13,13 @@ The per-concept time estimate is a flat figure from configuration today. The
 domain module takes it as an input precisely so that it can become a real
 estimate — drill and vocab item counts live in lesson_items — by changing this
 file rather than the ordering logic.
+
+**Each entry carries the items to practise it with** (D-133). Which sentences a
+review uses is a server decision like everything else about content, so the
+bot does not choose: up to REVIEW_ITEMS_PER_CONCEPT drill and vocab items per
+concept, the ones this learner practised longest ago first, with their media
+already resolved. Only concepts the learner has a mastery row for can appear
+here at all, so this is not a way to read a lesson without starting it (D-054).
 """
 
 from __future__ import annotations
@@ -27,11 +34,18 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUserDep, SessionDep, SettingsDep
+from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
+from app.api.v1.lessons import LessonItemOut, item_out, load_viewer
 from app.core.logging import get_logger
-from app.models.content import Concept
-from app.models.learning import ConceptMastery
+from app.models.content import Concept, Course, Lesson, LessonItem, MediaAsset
+from app.models.learning import Attempt, ConceptMastery
 from app.services.mastery import ReviewCandidate, build_review_queue
+from app.services.media import MediaCandidate, resolve
+
+#: The kinds of item a review practises: sentences with a known reference.
+#: Explanations are read rather than spoken, and an open question is a poor
+#: thing to drill out of context.
+REVIEW_ITEM_TYPES = ("drill", "vocab")
 
 log = get_logger(__name__)
 
@@ -83,6 +97,8 @@ class ReviewEntryOut(BaseModel):
     #: due rather than left invisible.
     next_due_at: datetime.datetime | None
     estimated_seconds: int
+    #: What to practise it with, in the order to practise it (D-133).
+    items: list[LessonItemOut]
 
 
 class ReviewQueueOut(BaseModel):
@@ -100,6 +116,7 @@ class ReviewQueueOut(BaseModel):
 @router.get("/queue")
 async def get_review_queue(
     session: SessionDep,
+    session_factory: SessionFactoryDep,
     settings: SettingsDep,
     user_id: CurrentUserDep,
     minutes: Annotated[ReviewMinutes, Query(description="Slot length in minutes")] = (
@@ -127,6 +144,15 @@ async def get_review_queue(
 
     concepts = {row.concept_id: concept for row, concept in rows}
     mastery_rows = {row.concept_id: row for row, _ in rows}
+    viewer = await load_viewer(
+        session, session_factory=session_factory, settings=settings, user_id=user_id
+    )
+    practise = await _load_review_items(
+        session,
+        user_id=user_id,
+        concept_ids=[entry.concept_id for entry in queue.entries],
+        per_concept=settings.review_items_per_concept,
+    )
 
     log.info(
         "review.queue_served",
@@ -149,6 +175,10 @@ async def get_review_queue(
                 attempt_count=mastery_rows[entry.concept_id].attempt_count,
                 next_due_at=entry.next_due_at,
                 estimated_seconds=entry.estimated_seconds,
+                items=[
+                    item_out(item, resolve(candidate, viewer, settings=settings))
+                    for item, candidate in practise.get(entry.concept_id, [])
+                ],
             )
             for entry in queue.entries
         ],
@@ -182,6 +212,74 @@ async def _load_candidates(
         .where(ConceptMastery.user_id == user_id)
     )
     return [(row[0], row[1]) for row in (await session.execute(statement)).all()]
+
+
+async def _load_review_items(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    concept_ids: list[uuid.UUID],
+    per_concept: int,
+) -> dict[uuid.UUID, list[tuple[LessonItem, MediaCandidate]]]:
+    """Up to ``per_concept`` spoken items for each concept, least recently practised first.
+
+    Never practised sorts before practised, then oldest attempt, then teaching
+    order — so a first review starts where the lesson did, and later ones walk
+    on through the concept's sentences. Items of organisation courses are left
+    out, as everywhere a C-side learner reads content.
+    """
+    if not concept_ids:
+        return {}
+    last_attempt = (
+        sa.select(Attempt.lesson_item_id, sa.func.max(Attempt.created_at).label("at"))
+        .where(Attempt.user_id == user_id)
+        .group_by(Attempt.lesson_item_id)
+        .subquery()
+    )
+    statement = (
+        sa.select(LessonItem, last_attempt.c.at, MediaAsset.kind, MediaAsset.url)
+        .join(Lesson, Lesson.id == LessonItem.lesson_id)
+        .join(Course, Course.id == Lesson.course_id)
+        .outerjoin(last_attempt, last_attempt.c.lesson_item_id == LessonItem.id)
+        .outerjoin(MediaAsset, MediaAsset.lesson_item_id == LessonItem.id)
+        .where(
+            LessonItem.concept_id.in_(concept_ids),
+            LessonItem.item_type.in_(REVIEW_ITEM_TYPES),
+            Course.org_id.is_(None),
+        )
+    )
+
+    items: dict[uuid.UUID, LessonItem] = {}
+    practised: dict[uuid.UUID, datetime.datetime | None] = {}
+    assets: dict[uuid.UUID, dict[str, str]] = {}
+    for item, at, kind, url in (await session.execute(statement)).all():
+        items.setdefault(item.id, item)
+        practised[item.id] = at
+        if kind is not None:
+            assets.setdefault(item.id, {})[kind] = url
+
+    def order(item: LessonItem) -> tuple[bool, datetime.datetime, int]:
+        at = practised[item.id]
+        floor = datetime.datetime.min.replace(tzinfo=datetime.UTC)
+        return (at is not None, at or floor, item.sequence)
+
+    chosen: dict[uuid.UUID, list[tuple[LessonItem, MediaCandidate]]] = {}
+    for item in sorted(items.values(), key=order):
+        if item.concept_id is None:  # excluded by the query; here for the type checker
+            continue
+        bucket = chosen.setdefault(item.concept_id, [])
+        if len(bucket) < per_concept:
+            bucket.append(
+                (
+                    item,
+                    MediaCandidate(
+                        item_media_type=item.media_type,
+                        audio_url=assets.get(item.id, {}).get("audio"),
+                        video_url=assets.get(item.id, {}).get("video"),
+                    ),
+                )
+            )
+    return chosen
 
 
 __all__ = ["router"]

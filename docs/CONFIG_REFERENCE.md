@@ -93,6 +93,7 @@
 | `REALTIME_CONTEXT_SUMMARIZE_AFTER_TURNS` | `8` | `[$]` 超过则摘要压缩 |
 | `QUOTA_RESET_HOUR_LOCAL` | `0` | 按用户时区的重置时刻 |
 | `REVIEW_ESTIMATED_SECONDS_PER_CONCEPT` | `60` | 复习队列切片用的单概念时长估算。目前是固定值，将来可按 item 数改算 |
+| `REVIEW_ITEMS_PER_CONCEPT` | `3` | 每个到期概念随复习队列下发的跟读/替换条目数。学员最久没练的优先，复习时轮换句子（D-133） |
 | `ATTEMPT_MAX_AUDIO_BYTES` | `2097152` | `[$]` 单次上传录音上限（2 MiB）。超出直接拒绝，不进评测 |
 
 ## 5. 成本护栏 `[$]`

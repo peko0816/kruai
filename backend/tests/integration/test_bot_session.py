@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from bot.flow import Session
+from bot.flow import Session, Step
 from bot.session import SessionStore, key_for
 from redis.asyncio import Redis
 
@@ -104,3 +104,35 @@ async def test_unreadable_state_is_thrown_away_rather_than_left_to_rot(
     await store.load(TELEGRAM_ID)
 
     assert await redis_client.get(key_for(TELEGRAM_ID)) is None
+
+
+async def test_a_review_s_steps_survive_the_round_trip(store: SessionStore) -> None:
+    """A review is not a lesson the API can be asked for again (D-133)."""
+    steps = (
+        Step(
+            item_id=uuid.uuid4(),
+            item_type="qa",
+            text="你要什么?",
+            audio_url="https://cdn.example/q.mp3",
+            answer_text="我要水。",
+            answer_audio_url="https://cdn.example/a.mp3",
+        ),
+        Step(item_id=uuid.uuid4(), item_type="drill", text="我要水。"),
+    )
+    session = Session(lesson_id=uuid.uuid4(), step_index=1, review_steps=steps)
+
+    await store.save(TELEGRAM_ID, session)
+
+    assert await store.load(TELEGRAM_ID) == session
+
+
+async def test_a_session_stored_before_reviews_existed_still_loads(
+    store: SessionStore, redis_client: Redis
+) -> None:
+    lesson_id = uuid.uuid4()
+    await redis_client.set(
+        key_for(TELEGRAM_ID),
+        f'{{"lesson_id": "{lesson_id}", "step_index": 2, "attempts_used": 1}}',
+    )
+
+    assert await store.load(TELEGRAM_ID) == Session(lesson_id, step_index=2, attempts_used=1)

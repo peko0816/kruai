@@ -83,6 +83,14 @@ class Session:
     lesson_id: uuid.UUID
     step_index: int = 0
     attempts_used: int = 0
+    #: A review carries its own steps (D-133). It is not a lesson the API can be
+    #: asked for again, and re-reading the queue mid-review would reshuffle it:
+    #: every attempt moves a concept's due date.
+    review_steps: tuple[Step, ...] = ()
+
+    @property
+    def is_review(self) -> bool:
+        return bool(self.review_steps)
 
     def at(self, index: int) -> Session:
         return replace(self, step_index=index, attempts_used=0)
@@ -130,6 +138,25 @@ def start(lesson: Lesson) -> Turn:
         {"title": lesson.title, "count": len(lesson.steps)},
     )
     return _present(lesson, session, preface=(opening,))
+
+
+def start_review(steps: tuple[Step, ...]) -> Turn:
+    """Open a review of what the API said is due (PRD 3.1 Smart Review).
+
+    The review's id is derived from its steps rather than drawn at random, so
+    this module stays free of anything that varies between runs.
+    """
+    if not steps:
+        return Turn(replies=(Reply("bot.review_nothing_due"),), session=None)
+    review_id = uuid.uuid5(uuid.NAMESPACE_URL, "review:" + ",".join(str(s.item_id) for s in steps))
+    session = Session(lesson_id=review_id, review_steps=steps)
+    opening = Reply("bot.review_started", {"count": len(steps)})
+    return _present(review_lesson(session), session, preface=(opening,))
+
+
+def review_lesson(session: Session) -> Lesson:
+    """The review a session is part-way through, as the lesson the flow walks."""
+    return Lesson(lesson_id=session.lesson_id, title="", steps=session.review_steps)
 
 
 def resume(lesson: Lesson, session: Session) -> Turn:

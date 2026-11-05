@@ -14,7 +14,9 @@ lesson against the real API. All providers are fake; the seam is the point.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -31,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.main import create_app
-from tests.integration.conftest import Rows
+from tests.integration.conftest import Execute, Rows
 from tests.unit.test_security import BOT_TOKEN
 
 pytestmark = pytest.mark.integration
@@ -63,8 +65,8 @@ async def imported(settings: Settings, db: sa.Engine, tmp_path: Path) -> None:
         )
 
 
-@pytest.fixture
-async def conversation(settings: Settings, redis_client: Redis) -> AsyncIterator[Conversation]:
+@asynccontextmanager
+async def bot_for(settings: Settings, redis_client: Redis) -> AsyncIterator[Conversation]:
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
@@ -74,6 +76,12 @@ async def conversation(settings: Settings, redis_client: Redis) -> AsyncIterator
                 SessionStore(redis_client, ttl_seconds=settings.bot_session_ttl_seconds),
                 max_retry=settings.scoring_max_retry,
             )
+
+
+@pytest.fixture
+async def conversation(settings: Settings, redis_client: Redis) -> AsyncIterator[Conversation]:
+    async with bot_for(settings, redis_client) as bot:
+        yield bot
 
 
 async def test_imported_content_can_be_learned_end_to_end(
@@ -107,3 +115,106 @@ async def test_imported_content_can_be_learned_end_to_end(
     # Scored, not crashed: one attempt per spoken step, and the lesson closed.
     assert rows("SELECT count(*) FROM attempts") == [(3,)]
     assert rows("SELECT status FROM lesson_progress") == [("completed",)]
+
+
+# ------------------------------------------------------------------ review (D-133)
+
+
+async def finish_the_lesson(conversation: Conversation) -> None:
+    await conversation.on_learn(LEARNER)
+    for _ in range(3):
+        await conversation.on_voice(LEARNER, audio=AUDIO)
+
+
+async def test_nothing_due_says_so(imported: None, conversation: Conversation, rows: Rows) -> None:
+    await finish_the_lesson(conversation)
+
+    replies = await conversation.on_review(LEARNER)
+
+    assert "Nothing is due" in replies[0].text
+
+
+def first_line(message: Any) -> str:
+    """What the learner is asked to say: exact, because 水 is inside 我要水。"""
+    return str(message.text).splitlines()[0]
+
+
+def as_tester(settings: Settings, **overrides: Any) -> Settings:
+    """Free allows three recordings a day and the lesson uses them; a trial
+    tester is Basic (D-131), which is who will be reviewing during the trial."""
+    return settings.model_copy(update={"trial_telegram_ids": (LEARNER.telegram_id,), **overrides})
+
+
+async def test_a_due_concept_comes_back_through_review(
+    imported: None, settings: Settings, redis_client: Redis, rows: Rows, execute: Execute
+) -> None:
+    """Smart Review, reachable from the bot: the drill and the vocab item of the
+    concept, scored like any attempt, and no lesson to complete at the end."""
+    draft = a_draft(concepts=1).concepts[0]
+    async with bot_for(as_tester(settings), redis_client) as bot:
+        await finish_the_lesson(bot)
+        execute("UPDATE concept_mastery SET next_due_at = now() - interval '1 day'")
+
+        opening = await bot.on_review(LEARNER)
+        assert "Review — 2 recordings." in opening[0].text
+        assert first_line(opening[-1]) == f"Say this: {draft.target_sentences[0].zh}"
+
+        await bot.on_voice(LEARNER, audio=AUDIO)
+        finished = await bot.on_voice(LEARNER, audio=AUDIO)
+
+    assert finished[-1].text == "Review finished."
+    assert rows("SELECT count(*) FROM attempts") == [(5,)]
+    assert rows("SELECT count(*) FROM lesson_progress") == [(1,)], "a review is not a lesson"
+
+
+async def test_a_review_rotates_through_a_concept_s_items(
+    imported: None, settings: Settings, redis_client: Redis, rows: Rows, execute: Execute
+) -> None:
+    """One item per concept: the one practised longest ago, so the next review
+    picks up the other rather than repeating the first."""
+    draft = a_draft(concepts=1).concepts[0]
+    async with bot_for(as_tester(settings, review_items_per_concept=1), redis_client) as bot:
+        await finish_the_lesson(bot)
+        execute("UPDATE concept_mastery SET next_due_at = now() - interval '1 day'")
+        first = await bot.on_review(LEARNER)
+        await bot.on_voice(LEARNER, audio=AUDIO)
+        execute("UPDATE concept_mastery SET next_due_at = now() - interval '1 day'")
+        second = await bot.on_review(LEARNER)
+
+    assert "Review — 1 recordings." in first[0].text, "REVIEW_ITEMS_PER_CONCEPT=1"
+    # The drill was spoken before the vocab item in the lesson, so it is older.
+    assert first_line(first[-1]) == f"Say this: {draft.target_sentences[0].zh}"
+    assert first_line(second[-1]) == f"Say this: {draft.substitutions[0].zh}"
+    assert rows("SELECT count(*) FROM attempts") == [(4,)], "the review attempt was scored"
+
+
+async def test_a_never_practised_item_comes_before_a_practised_one(
+    imported: None, settings: Settings, redis_client: Redis, execute: Execute
+) -> None:
+    """Say the learner left the lesson before the vocab item: that item is the
+    one the concept most needs, so it leads, ahead of the drill they did say."""
+    draft = a_draft(concepts=1).concepts[0]
+    async with bot_for(as_tester(settings, review_items_per_concept=1), redis_client) as bot:
+        await finish_the_lesson(bot)
+        execute(
+            "DELETE FROM attempts WHERE lesson_item_id IN "
+            "(SELECT id FROM lesson_items WHERE item_type = 'vocab')"
+        )
+        execute("UPDATE concept_mastery SET next_due_at = now() - interval '1 day'")
+        review = await bot.on_review(LEARNER)
+
+    assert first_line(review[-1]) == f"Say this: {draft.substitutions[0].zh}"
+
+
+async def test_learn_puts_a_review_down_and_opens_the_lesson(
+    imported: None, conversation: Conversation, execute: Execute
+) -> None:
+    await finish_the_lesson(conversation)
+    execute("UPDATE concept_mastery SET next_due_at = now() - interval '1 day'")
+    await conversation.on_review(LEARNER)
+
+    replies = await conversation.on_learn(LEARNER)
+
+    # The only lesson is done, so /learn says so — rather than trying to load
+    # the review as if it were a lesson, which the API does not know.
+    assert "finished every lesson" in replies[0].text

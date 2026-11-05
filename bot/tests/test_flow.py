@@ -12,7 +12,16 @@ import uuid
 
 import pytest
 
-from bot.flow import Lesson, Session, Step, on_voice_scored, resume, start
+from bot.flow import (
+    Lesson,
+    Session,
+    Step,
+    on_voice_scored,
+    resume,
+    review_lesson,
+    start,
+    start_review,
+)
 
 MAX_RETRY = 3
 
@@ -312,3 +321,48 @@ def test_the_recording_travels_with_the_prompt() -> None:
     turn = start(unit)
 
     assert turn.replies[-1].audio_url == "https://cdn.example/a.mp3"
+
+
+# ------------------------------------------------------------------- review (D-133)
+
+
+def test_an_empty_review_says_nothing_is_due() -> None:
+    turn = start_review(())
+
+    assert keys(turn) == ["bot.review_nothing_due"]
+    assert turn.session is None
+
+
+def test_a_review_opens_on_its_first_step_and_carries_its_steps() -> None:
+    steps = (step("drill"), step("vocab"))
+
+    turn = start_review(steps)
+
+    assert keys(turn) == ["bot.review_started", "bot.prompt_drill"]
+    assert turn.replies[0].params == {"count": 2}
+    assert turn.session is not None and turn.session.is_review
+    assert review_lesson(turn.session).steps == steps
+
+
+def test_a_review_s_id_is_the_same_for_the_same_steps() -> None:
+    """Pure: no randomness in the flow module."""
+    steps = (step("drill"),)
+
+    first, second = start_review(steps).session, start_review(steps).session
+
+    assert first is not None and second is not None
+    assert first.lesson_id == second.lesson_id
+
+
+def test_moving_through_a_review_keeps_it_a_review() -> None:
+    turn = start_review((step("drill"), step("vocab")))
+    assert turn.session is not None
+    unit = review_lesson(turn.session)
+
+    after = on_voice_scored(unit, turn.session, passed=True, score=90.0, max_retry=MAX_RETRY)
+
+    assert after.session is not None and after.session.is_review
+
+
+def test_a_lesson_session_is_not_a_review() -> None:
+    assert not Session(lesson_id=uuid.uuid4()).is_review

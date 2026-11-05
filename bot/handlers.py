@@ -22,7 +22,16 @@ from telegram.ext import ContextTypes
 from app.core.logging import get_logger
 from bot import i18n
 from bot.api_client import ApiError, KruaiApi
-from bot.flow import Lesson, Reply, Turn, on_voice_scored, resume, start
+from bot.flow import (
+    Lesson,
+    Reply,
+    Turn,
+    on_voice_scored,
+    resume,
+    review_lesson,
+    start,
+    start_review,
+)
 from bot.session import SessionStore
 
 log = get_logger(__name__)
@@ -71,7 +80,9 @@ class Conversation:
         self._max_retry = max_retry
 
     async def on_start(self, learner: Learner) -> list[Outgoing]:
-        return _render([Reply("bot.welcome"), Reply("bot.help")], learner.locale)
+        return _render(
+            [Reply("bot.welcome"), Reply("bot.help"), Reply("bot.help_review")], learner.locale
+        )
 
     async def on_status(self, learner: Learner) -> list[Outgoing]:
         """What is left of today, in the learner's own words."""
@@ -107,6 +118,11 @@ class Conversation:
         try:
             token = await self._token(learner)
             stored = await self._sessions.load(learner.telegram_id)
+            if stored is not None and stored.is_review:
+                # /learn means a lesson. The review is put down; what it
+                # scored is already recorded.
+                await self._sessions.clear(learner.telegram_id)
+                stored = None
             if stored is not None:
                 lesson = await self._api.lesson(token, stored.lesson_id)
                 return await self._play(learner, lesson, resume(lesson, stored), token)
@@ -129,6 +145,19 @@ class Conversation:
         except ApiError as exc:
             return self._on_api_error(exc, learner)
 
+    async def on_review(self, learner: Learner) -> list[Outgoing]:
+        """Practise what is due (D-133). Replaces whatever was open: a lesson's
+        progress is the server's, and /learn picks it up again."""
+        try:
+            token = await self._token(learner)
+            steps = await self._api.review_steps(token)
+        except ApiError as exc:
+            return self._on_api_error(exc, learner)
+        turn = start_review(steps)
+        if turn.session is None:
+            return _render(list(turn.replies), learner.locale)
+        return await self._play(learner, review_lesson(turn.session), turn, token, review=True)
+
     async def on_stop(self, learner: Learner) -> list[Outgoing]:
         """Put the lesson down. Progress already recorded stays recorded."""
         await self._sessions.clear(learner.telegram_id)
@@ -144,7 +173,11 @@ class Conversation:
 
         try:
             token = await self._token(learner)
-            lesson = await self._api.lesson(token, session.lesson_id)
+            lesson = (
+                review_lesson(session)
+                if session.is_review
+                else await self._api.lesson(token, session.lesson_id)
+            )
             if session.step_index >= len(lesson.steps):
                 # The pack shrank under them; resume() handles this shape.
                 return await self._play(learner, lesson, resume(lesson, session), token)
@@ -166,12 +199,12 @@ class Conversation:
             score=float(result["scores"]["pron"] or 0.0),
             max_retry=self._max_retry,
         )
-        return await self._play(learner, lesson, turn, token)
+        return await self._play(learner, lesson, turn, token, review=session.is_review)
 
     # ----------------------------------------------------------- internals
 
     async def _play(
-        self, learner: Learner, lesson: Lesson, turn: Turn, token: str
+        self, learner: Learner, lesson: Lesson, turn: Turn, token: str, *, review: bool = False
     ) -> list[Outgoing]:
         """Send a turn's replies and store where it left the learner."""
         replies = list(turn.replies)
@@ -182,7 +215,12 @@ class Conversation:
             await self._sessions.clear(learner.telegram_id)
 
         if turn.finished:
-            replies.append(await self._complete(lesson, token))
+            # A review is not a lesson: there is nothing to complete, and the
+            # attempts have already moved every concept it touched.
+            if review:
+                replies.append(Reply("bot.review_finished"))
+            else:
+                replies.append(await self._complete(lesson, token))
 
         log.info(
             "bot.turn",
@@ -281,6 +319,10 @@ async def learn_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _send(update, await _conversation(context).on_learn(learner_from(update)))
 
 
+async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _send(update, await _conversation(context).on_review(learner_from(update)))
+
+
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _send(update, await _conversation(context).on_stop(learner_from(update)))
 
@@ -311,6 +353,7 @@ def register(application: Any, conversation: Conversation) -> None:
     application.bot_data["conversation"] = conversation
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("learn", learn_command))
+    application.add_handler(CommandHandler("review", review_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(MessageHandler(filters.VOICE, voice_message))
