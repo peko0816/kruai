@@ -29,6 +29,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
+import json
+import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -61,6 +63,40 @@ VOICE_FOR: Final[dict[str, Voice]] = {
     "zh": Voice.ZH_MODEL,
     "km": Voice.KM_NARRATOR,
 }
+
+
+#: A run of Chinese inside Khmer text — the example a Khmer explanation quotes.
+#: Starts and ends on a character, so CJK punctuation between two characters
+#: (一块、两块) stays in the run and punctuation around it does not.
+_CHINESE_RUN: Final = re.compile(
+    r"[\u4e00-\u9fff](?:[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]*[\u4e00-\u9fff])?"
+)
+
+#: What a Khmer voice can say. A stretch with none of it — the quotation marks
+#: around an example, a lone bracket — would come back as empty audio.
+_SAYABLE: Final = re.compile(r"[\u1780-\u17ff0-9A-Za-z]")
+
+
+def voiced_segments(text: str) -> list[tuple[str, str]]:
+    """Khmer text cut into (language, text) pieces, Chinese runs apart (D-138).
+
+    The Khmer voice skips Han characters without a word — checked: an
+    explanation with its quoted example and the same text without it come back
+    the same length to the millisecond, and the example alone comes back empty.
+    So the example a learner is being taught was silent in 37 of 48 lessons.
+    """
+    pieces: list[tuple[str, str]] = []
+    position = 0
+    for run in _CHINESE_RUN.finditer(text):
+        before = text[position : run.start()]
+        if _SAYABLE.search(before):
+            pieces.append(("km", before))
+        pieces.append(("zh", run.group(0)))
+        position = run.end()
+    rest = text[position:]
+    if _SAYABLE.search(rest):
+        pieces.append(("km", rest))
+    return pieces
 
 
 class Synthesiser:
@@ -128,6 +164,76 @@ class Synthesiser:
         )
         return identity
 
+    async def say_khmer(self, text: str, *, km: TTSProvider, zh: TTSProvider) -> str:
+        """Khmer text, with any Chinese it quotes read by the Chinese voice (D-138).
+
+        One clip: each piece is synthesised in its own voice and rate, and the
+        pieces are joined. Both providers emit the same constant-rate MP3, so
+        the frames concatenate into a stream that plays straight through and
+        whose duration is the sum. Text without Chinese takes exactly the path
+        it always did, so its identity — and its file — does not change.
+        """
+        pieces = voiced_segments(text)
+        if all(language == "km" for language, _ in pieces):
+            return await self.say(text, language="km", provider=km)
+
+        plan = [
+            (language, piece, speaking_rate_for(VOICE_FOR[language], settings=self._settings))
+            for language, piece in pieces
+        ]
+        km_rate = speaking_rate_for(Voice.KM_NARRATOR, settings=self._settings)
+        identity = text_hash(
+            json.dumps(plan, ensure_ascii=False),
+            voice=f"{Voice.KM_NARRATOR.value}+{Voice.ZH_MODEL.value}",
+            speaking_rate=km_rate,
+        )
+        if identity in self._assets:
+            self.reused += 1
+            return identity
+
+        audio: list[bytes] = []
+        voices: list[str] = []
+        duration_ms = 0
+        formats: set[str] = set()
+        for language, piece, rate in plan:
+            provider = km if language == "km" else zh
+            result = await provider.synthesize(piece, voice=VOICE_FOR[language], speaking_rate=rate)
+            self.calls += 1
+            self.cost_usd_cents += result.cost_usd_cents
+            if not result.ok:
+                self.failures.append((text, result.error_code or "tts.failed"))
+                return ""
+            audio.append(result.audio)
+            duration_ms += result.duration_ms
+            formats.add(result.audio_format)
+            if result.resolved_voice not in voices:
+                voices.append(result.resolved_voice)
+        if len(formats) != 1:
+            # Frames of two formats do not make one playable stream.
+            self.failures.append((text, "tts.mixed_formats"))
+            return ""
+
+        joined = b"".join(audio)
+        audio_format = formats.pop()
+        path = f"km/{identity[:2]}/{identity}.{audio_format}"
+        destination = self._media_dir / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(joined)
+
+        self._assets[identity] = MediaAsset(
+            id=identity,
+            language="km",
+            voice=Voice.KM_NARRATOR.value,
+            resolved_voice="+".join(voices),
+            provider=km.name if km.name == zh.name else f"{km.name}+{zh.name}",
+            speaking_rate=km_rate,
+            text=text,
+            path=path,
+            duration_ms=duration_ms,
+            bytes=len(joined),
+        )
+        return identity
+
 
 async def build(
     draft: Draft,
@@ -170,7 +276,7 @@ async def build(
                 prompt_km=dialogue.prompt_km,
                 sample_answer_zh=dialogue.sample_answer_zh,
                 prompt_audio_zh=await synth.say(dialogue.prompt_zh, language="zh", provider=zh),
-                prompt_audio_km=await synth.say(dialogue.prompt_km, language="km", provider=km),
+                prompt_audio_km=await synth.say_khmer(dialogue.prompt_km, km=km, zh=zh),
                 sample_answer_audio_zh=await synth.say(
                     dialogue.sample_answer_zh, language="zh", provider=zh
                 ),
@@ -184,9 +290,7 @@ async def build(
                 pattern=concept.pattern,
                 hskk_task_types=concept.hskk_task_types,
                 km_explanation=concept.km_explanation,
-                explanation_audio=await synth.say(
-                    concept.km_explanation, language="km", provider=km
-                ),
+                explanation_audio=await synth.say_khmer(concept.km_explanation, km=km, zh=zh),
                 target_sentences=tuple(sentences),
                 substitutions=tuple(substitutions),
                 dialogues=tuple(dialogues),
