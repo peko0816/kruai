@@ -26,6 +26,7 @@ from bot.flow import (
     Lesson,
     Reply,
     Turn,
+    mark_weak,
     on_voice_scored,
     resume,
     review_lesson,
@@ -198,6 +199,10 @@ class Conversation:
             passed=bool(result["passed"]),
             score=float(result["scores"]["pron"] or 0.0),
             max_retry=self._max_retry,
+            marked=mark_weak(
+                result.get("reference_text") or "",
+                tuple((str(w["word"]), bool(w["weak"])) for w in result.get("words", ())),
+            ),
         )
         return await self._play(learner, lesson, turn, token, review=session.is_review)
 

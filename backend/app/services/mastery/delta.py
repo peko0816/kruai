@@ -124,6 +124,20 @@ def is_passing(pron_score: float, *, settings: Settings) -> bool:
     return pron_score >= settings.scoring_pass_threshold
 
 
+#: Error types a provider reports for a word the learner got wrong or left out.
+#: An insertion is a word they added, which has no place in the sentence to mark.
+WEAK_ERROR_TYPES: Final = frozenset({"Mispronunciation", "Omission"})
+
+
+def is_weak_word(*, accuracy: float, error_type: str | None, settings: Settings) -> bool:
+    """Whether one word of an attempt is worth pointing out to the learner (D-134).
+
+    Said wrong or left out, whatever its number; otherwise, below the same pass
+    mark ``is_passing`` uses, so the two can never disagree about where it is.
+    """
+    return error_type in WEAK_ERROR_TYPES or not is_passing(accuracy, settings=settings)
+
+
 def clamp_mastery(value: float) -> float:
     return max(MASTERY_FLOOR, min(MASTERY_CEILING, value))
 

@@ -33,5 +33,6 @@
   "bot.status": "គម្រោង : {plan} ការសាកល្បងថ្ងៃនេះ: {used}{limit_suffix}",
   "bot.status_limit_suffix": "/{limit}",
   "bot.status_unlimited": "",
+  "bot.weak_words": "{text}",
   "bot.welcome": "KruAI — ការហ្វឹកហាត់ការនិយាយភាសាចិន សូមបញ្ជូន /learn ដើម្បីចាប់ផ្តើមមេរៀន"
 }

@@ -16,6 +16,7 @@ from bot.flow import (
     Lesson,
     Session,
     Step,
+    mark_weak,
     on_voice_scored,
     resume,
     review_lesson,
@@ -366,3 +367,76 @@ def test_moving_through_a_review_keeps_it_a_review() -> None:
 
 def test_a_lesson_session_is_not_a_review() -> None:
     assert not Session(lesson_id=uuid.uuid4()).is_review
+
+
+# -------------------------------------------------------------- weak words (D-134)
+
+
+def test_weak_characters_are_bracketed_in_the_sentence() -> None:
+    words = (("书", False), ("在", False), ("桌", True), ("子", False), ("上", False))
+
+    assert mark_weak("书在桌子上。", words) == "书在【桌】子上。"
+
+
+def test_neighbouring_weak_words_share_a_bracket() -> None:
+    words = (("书", False), ("在", False), ("桌", True), ("子", True), ("上", False))
+
+    assert mark_weak("书在桌子上。", words) == "书在【桌子】上。"
+
+
+def test_a_multi_character_word_is_marked_whole() -> None:
+    """Azure segments Chinese into words, not characters."""
+    words = (("书", False), ("在", False), ("桌子", True), ("上", False))
+
+    assert mark_weak("书在桌子上。", words) == "书在【桌子】上。"
+
+
+def test_a_repeated_character_is_marked_where_it_was_said() -> None:
+    words = (("常", False), ("常", True))
+
+    assert mark_weak("常常", words) == "常【常】"
+
+
+def test_a_word_not_in_the_sentence_is_skipped_not_guessed() -> None:
+    """An insertion, or a provider that tokenised differently from the text."""
+    words = (("我", False), ("呢", True), ("要", True), ("水", False))
+
+    assert mark_weak("我要水", words) == "我【要】水"
+
+
+def test_nothing_weak_means_nothing_to_show() -> None:
+    assert mark_weak("我要水", (("我", False), ("要", False), ("水", False))) is None
+    assert mark_weak("", (("我", True),)) is None
+
+
+def test_the_marked_sentence_follows_the_score_before_a_retry() -> None:
+    unit = lesson("drill", "vocab")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(
+        unit, session, passed=False, score=40.0, max_retry=MAX_RETRY, marked="我【要】水"
+    )
+
+    assert keys(turn) == ["bot.score_failed_retry", "bot.weak_words", "bot.prompt_drill"]
+    assert turn.replies[1].params == {"text": "我【要】水"}
+
+
+def test_the_marked_sentence_follows_a_pass_too() -> None:
+    """Passing overall can still hide one character worth hearing again."""
+    unit = lesson("drill", "vocab")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(
+        unit, session, passed=True, score=75.0, max_retry=MAX_RETRY, marked="我【要】水"
+    )
+
+    assert keys(turn) == ["bot.score_passed", "bot.weak_words", "bot.prompt_vocab"]
+
+
+def test_no_marked_sentence_no_extra_line() -> None:
+    unit = lesson("drill", "vocab")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(unit, session, passed=False, score=40.0, max_retry=MAX_RETRY)
+
+    assert "bot.weak_words" not in keys(turn)

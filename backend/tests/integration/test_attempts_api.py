@@ -397,6 +397,53 @@ async def test_an_answer_in_the_learner_s_own_words_stays_open(
     assert body["scores"]["completeness"] is None
 
 
+async def test_a_failing_recording_marks_its_words_weak_against_the_sentence_used(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    """Weak is decided here, against the pass mark ``passed`` uses (D-134)."""
+    headers = await authenticated(client)
+
+    body = (await attempt(client, seeded["failing_drill"], headers=headers)).json()
+
+    assert body["words"], "the scorer aligned the sentence word by word"
+    assert all(word["weak"] for word in body["words"])
+    assert body["reference_text"] == f"{TARGET_TEXT}{BAD_MARKER}"
+
+
+async def test_a_passing_recording_marks_nothing_weak(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    headers = await authenticated(client)
+
+    body = (await attempt(client, seeded["drill"], headers=headers)).json()
+
+    assert body["words"]
+    assert not any(word["weak"] for word in body["words"])
+    assert body["reference_text"] == TARGET_TEXT
+
+
+async def test_the_line_moves_with_the_pass_mark(
+    seeded: dict[str, uuid.UUID], settings: Settings
+) -> None:
+    """A word scoring in the passing band is weak once the mark is raised past it:
+    the threshold is configuration, not a constant here (R3)."""
+    async with client_for(settings.model_copy(update={"scoring_pass_threshold": 99.0})) as client:
+        headers = await authenticated(client)
+        body = (await attempt(client, seeded["drill"], headers=headers)).json()
+
+    assert all(word["weak"] for word in body["words"])
+
+
+async def test_an_open_answer_has_no_reference_to_mark(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID]
+) -> None:
+    headers = await authenticated(client)
+
+    body = (await attempt(client, seeded["qa"], headers=headers)).json()
+
+    assert body["reference_text"] is None
+
+
 async def test_an_item_without_a_concept_scores_but_advances_nothing(
     client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
 ) -> None:

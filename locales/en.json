@@ -33,5 +33,6 @@
   "bot.status": "Plan: {plan}. Attempts today: {used}{limit_suffix}.",
   "bot.status_limit_suffix": " of {limit}",
   "bot.status_unlimited": "",
+  "bot.weak_words": "{text}",
   "bot.welcome": "KruAI — Chinese speaking practice. Send /learn to start a lesson."
 }
