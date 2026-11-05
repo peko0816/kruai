@@ -18,7 +18,7 @@ import pytest
 from app.core.config import Settings
 from app.services.tts.base import SynthesisResult, TTSProvider, Voice
 from pipeline import build_pack as build_module
-from pipeline.build_pack import Synthesiser, build
+from pipeline.build_pack import Synthesiser, build, voiced_segments
 from pipeline.draft import Draft
 from pipeline.pack import Pack, text_hash
 
@@ -366,3 +366,130 @@ def test_a_clean_build_reports_what_it_made(
     assert "2 concept(s)" in captured.out
     assert "warning" not in captured.out
     assert Pack.model_validate_json(out.read_text(encoding="utf-8")).validated is True
+
+
+# --------------------------------------------- Chinese quoted in Khmer (D-138)
+
+EXAMPLE = f'{KM} "书在桌子上" មានន័យថា {KM}។'
+
+
+class _Voice(TTSProvider):
+    """Records what it was asked to say; its audio is the text's own bytes."""
+
+    def __init__(self, name: str, *, fail_on: str = "", audio_format: str = "mp3") -> None:
+        self.name = name
+        self.said: list[tuple[str, Voice, float]] = []
+        self._fail_on = fail_on
+        self._format = audio_format
+
+    async def synthesize(
+        self, text: str, *, voice: Voice, speaking_rate: float = 1.0, audio_format: str = "mp3"
+    ) -> SynthesisResult:
+        self.said.append((text, voice, speaking_rate))
+        if self._fail_on and self._fail_on in text:
+            return SynthesisResult(ok=False, error_code="tts.timeout")
+        return SynthesisResult(
+            ok=True,
+            audio=text.encode(),
+            audio_format=self._format,
+            duration_ms=100 * len(text),
+            resolved_voice=f"{self.name}-voice",
+            cost_usd_cents=0,
+        )
+
+    def available_voices(self) -> dict[Voice, str]:
+        return dict.fromkeys(Voice, f"{self.name}-voice")
+
+
+def test_a_quoted_example_is_cut_out_for_the_chinese_voice() -> None:
+    assert voiced_segments(EXAMPLE) == [
+        ("km", f'{KM} "'),
+        ("zh", "书在桌子上"),
+        ("km", f'" មានន័យថា {KM}។'),
+    ]
+
+
+def test_chinese_punctuation_between_characters_stays_in_the_run() -> None:
+    assert [lang for lang, _ in voiced_segments(f"{KM} 一块、两块 {KM}")] == ["km", "zh", "km"]
+    assert ("zh", "一块、两块") in voiced_segments(f"{KM} 一块、两块 {KM}")
+
+
+def test_nothing_sayable_in_khmer_is_left_out() -> None:
+    """The Khmer voice returns empty audio for a lone quotation mark."""
+    assert voiced_segments('"我要水"') == [("zh", "我要水")]
+
+
+def test_khmer_without_chinese_is_one_piece() -> None:
+    assert voiced_segments(f"{KM}។") == [("km", f"{KM}។")]
+
+
+async def test_each_piece_is_read_by_its_own_voice_at_its_own_rate(tmp_path: Path) -> None:
+    configured = settings(TTS_SPEAKING_RATE_ZH="0.9", TTS_SPEAKING_RATE_KM="1.0")
+    synth = Synthesiser(settings=configured, media_dir=tmp_path / "media")
+    km, zh = _Voice("km"), _Voice("zh")
+
+    identity = await synth.say_khmer(EXAMPLE, km=km, zh=zh)
+
+    assert zh.said == [("书在桌子上", Voice.ZH_MODEL, 0.9)]
+    assert [voice for _, voice, _ in km.said] == [Voice.KM_NARRATOR, Voice.KM_NARRATOR]
+    asset = {a.id: a for a in synth.assets}[identity]
+    written = (tmp_path / "media" / asset.path).read_bytes()
+    assert written == "".join(text for _, text in voiced_segments(EXAMPLE)).encode()
+    assert asset.duration_ms == 100 * sum(len(text) for _, text in voiced_segments(EXAMPLE))
+    assert asset.resolved_voice == "km-voice+zh-voice"
+    assert asset.text == EXAMPLE
+
+
+async def test_khmer_without_chinese_keeps_its_old_identity(tmp_path: Path) -> None:
+    """Explanations that quote nothing are the same file they always were."""
+    synth = Synthesiser(settings=settings(), media_dir=tmp_path / "media")
+    km, zh = _Voice("km"), _Voice("zh")
+
+    identity = await synth.say_khmer(f"{KM}។", km=km, zh=zh)
+
+    assert identity == text_hash(f"{KM}។", voice="km_narrator", speaking_rate=1.0)
+    assert zh.said == []
+
+
+async def test_the_same_mixed_text_is_synthesised_once(tmp_path: Path) -> None:
+    synth = Synthesiser(settings=settings(), media_dir=tmp_path / "media")
+    km, zh = _Voice("km"), _Voice("zh")
+
+    first = await synth.say_khmer(EXAMPLE, km=km, zh=zh)
+    second = await synth.say_khmer(EXAMPLE, km=km, zh=zh)
+
+    assert first == second
+    assert len(zh.said) == 1
+    assert synth.reused == 1
+
+
+async def test_one_failed_piece_fails_the_whole_clip(tmp_path: Path) -> None:
+    """Half an explanation is worse than the text alone (ARCHITECTURE 5)."""
+    synth = Synthesiser(settings=settings(), media_dir=tmp_path / "media")
+
+    identity = await synth.say_khmer(EXAMPLE, km=_Voice("km"), zh=_Voice("zh", fail_on="书"))
+
+    assert identity == ""
+    assert synth.failures == [(EXAMPLE, "tts.timeout")]
+    assert synth.assets == ()
+
+
+async def test_pieces_in_different_formats_are_not_joined(tmp_path: Path) -> None:
+    synth = Synthesiser(settings=settings(), media_dir=tmp_path / "media")
+
+    identity = await synth.say_khmer(EXAMPLE, km=_Voice("km"), zh=_Voice("zh", audio_format="wav"))
+
+    assert identity == ""
+    assert synth.failures == [(EXAMPLE, "tts.mixed_formats")]
+
+
+def test_a_built_explanation_quoting_chinese_carries_both_voices(tmp_path: Path) -> None:
+    """Wired into the build, not only defined."""
+    draft = a_draft(concepts=1)
+    quoting = draft.concepts[0].model_copy(update={"km_explanation": EXAMPLE})
+    pack = make(draft.model_copy(update={"concepts": (quoting,)}), tmp_path)
+
+    explanation = {a.id: a for a in pack.media}[pack.concepts[0].explanation_audio]
+
+    assert explanation.text == EXAMPLE
+    assert explanation.id != text_hash(EXAMPLE, voice="km_narrator", speaking_rate=1.0)
