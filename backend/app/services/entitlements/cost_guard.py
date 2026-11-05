@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Plan, Settings
 from app.models.commerce import CostLedger
+from app.services.cost_ledger import millicents_to_cents
 
 #: Fixed-point scale for the multiplier. Three digits is far more precision
 #: than a guardrail ratio needs and keeps every product inside an int.
@@ -95,12 +96,14 @@ async def monthly_spend_usd_cents(
     quietly too small.
     """
     total = await session.execute(
-        sa.select(sa.func.coalesce(sa.func.sum(CostLedger.cost_usd_cents_est), 0)).where(
+        sa.select(sa.func.coalesce(sa.func.sum(CostLedger.cost_usd_millicents_est), 0)).where(
             CostLedger.user_id == user_id,
             CostLedger.occurred_at >= month_start(now),
         )
     )
-    return int(total.scalar_one())
+    # Summed in thousandths and rounded once (D-136). Rounding every row up to
+    # a cent made a learner on Basic look ten times dearer than they were.
+    return millicents_to_cents(int(total.scalar_one()))
 
 
 __all__ = [

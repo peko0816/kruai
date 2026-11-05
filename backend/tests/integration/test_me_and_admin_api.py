@@ -103,8 +103,10 @@ def ledger(
     """A cost_ledger row placed in the past, which no endpoint can do."""
     execute(
         "INSERT INTO cost_ledger "
-        "(occurred_at, user_id, provider, unit, quantity, cost_usd_cents_est, ref) "
-        "VALUES (now() - make_interval(days => :days), :u, :p, :unit, :q, :cost, 'attempt')",
+        "(occurred_at, user_id, provider, unit, quantity, cost_usd_cents_est, "
+        " cost_usd_millicents_est, ref) "
+        "VALUES (now() - make_interval(days => :days), :u, :p, :unit, :q, :cost, :cost * 1000, "
+        "'attempt')",
         days=days_ago,
         u=user_id,
         p=provider,
@@ -309,6 +311,31 @@ async def test_grouping_by_provider(settings: Settings, execute: Execute) -> Non
     assert body["total_usd_cents"] == 49
 
 
+async def test_the_report_sums_below_a_cent_before_rounding(
+    settings: Settings, execute: Execute
+) -> None:
+    """Three calls at 0.4 cents report as 2 cents, not 3 (D-136) — and the total
+    across groups is summed before rounding too: 1.2 + 0.4 is 2 cents, where
+    adding the rounded groups would say 3."""
+    configured = with_operator(settings)
+    for provider in ("azure", "azure", "azure", "openai"):
+        execute(
+            "INSERT INTO cost_ledger (provider, unit, quantity, cost_usd_cents_est, "
+            " cost_usd_millicents_est, ref) VALUES (:p, 'calls', 1, 1, 400, 'attempt')",
+            p=provider,
+        )
+
+    async with client_for(configured) as client:
+        headers = await authenticated(client, telegram_id=OPERATOR_TELEGRAM_ID)
+        body = (await client.get(f"{COSTS_URL}?group_by=provider", headers=headers)).json()
+
+    assert [(r["key"], r["cost_usd_cents"], r["cost_usd_millicents"]) for r in body["rows"]] == [
+        ("azure", 2, 1200),
+        ("openai", 1, 400),
+    ]
+    assert body["total_usd_cents"] == 2
+
+
 async def test_grouping_by_user_finds_the_expensive_learner(
     settings: Settings, execute: Execute
 ) -> None:
@@ -342,7 +369,14 @@ async def test_a_call_with_no_user_is_reported_rather_than_dropped(
         body = (await client.get(f"{COSTS_URL}?group_by=user", headers=headers)).json()
 
     assert body["rows"] == [
-        {"key": None, "cost_usd_cents": 88, "unit": "calls", "quantity": 1.0, "calls": 1}
+        {
+            "key": None,
+            "cost_usd_cents": 88,
+            "cost_usd_millicents": 88000,
+            "unit": "calls",
+            "quantity": 1.0,
+            "calls": 1,
+        }
     ]
 
 
@@ -408,8 +442,9 @@ async def test_a_row_late_on_the_final_day_is_included(
     configured = with_operator(settings)
     today = datetime.datetime.now(datetime.UTC).date()
     execute(
-        "INSERT INTO cost_ledger (occurred_at, provider, unit, quantity, cost_usd_cents_est, ref) "
-        "VALUES (:at, 'azure', 'calls', 1, 77, 'attempt')",
+        "INSERT INTO cost_ledger (occurred_at, provider, unit, quantity, cost_usd_cents_est, "
+        " cost_usd_millicents_est, ref) "
+        "VALUES (:at, 'azure', 'calls', 1, 77, 77000, 'attempt')",
         at=datetime.datetime.combine(today, datetime.time(23, 30), tzinfo=datetime.UTC),
     )
 

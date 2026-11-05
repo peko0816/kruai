@@ -209,6 +209,15 @@ class CostLedger(Base):
     #: seconds / tokens / calls / minutes
     unit: Mapped[str] = mapped_column(sa.Text, nullable=False)
     quantity: Mapped[float] = mapped_column(sa.REAL, nullable=False)
+    #: This row's cost rounded up to a cent, for reading one row at a time.
     cost_usd_cents_est: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     #: 'attempt' / 'realtime' / 'content_production'
     ref: Mapped[str | None] = mapped_column(sa.Text)
+    #: The same cost in thousandths of a cent. Every total is summed from this
+    #: and rounded once at the end: a four-second assessment is about 0.11
+    #: cents, and rounding each row up to a cent overstated a learner's month
+    #: about tenfold (D-136). Last because it was added last: column order is
+    #: compared against the DDL, and a migration can only append.
+    cost_usd_millicents_est: Mapped[int] = mapped_column(
+        sa.BigInteger, nullable=False, server_default=sa.text("0")
+    )

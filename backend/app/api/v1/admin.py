@@ -14,7 +14,7 @@ operator puts their id in it this endpoint answers 403 to everyone, including
 them. An operations endpoint that is open until somebody remembers to close it
 is an open endpoint.
 
-Costs are estimates (``cost_usd_cents_est``), written by whoever made the call
+Costs are estimates (``cost_usd_millicents_est``, reported in cents), written by whoever made the call
 from what the provider said it charged. They are not an invoice, and the gap
 between them and the real bill is itself worth watching.
 
@@ -44,6 +44,7 @@ from app.core.errors import InvalidQueryWindow, PermissionDenied
 from app.core.logging import get_logger
 from app.models.commerce import CostLedger
 from app.models.users import User
+from app.services.cost_ledger import millicents_to_cents
 from app.services.entitlements import alert_threshold_usd_cents
 
 log = get_logger(__name__)
@@ -71,6 +72,10 @@ class CostRowOut(BaseModel):
     #: production is billed to the pipeline, not to a learner (PRD 11.3).
     key: str | None
     cost_usd_cents: int
+    #: The same, unrounded, in thousandths of a cent. Totals are summed from
+    #: this, so a report of many sub-cent calls is not one cent per row too
+    #: high (D-136).
+    cost_usd_millicents: int
     #: Units consumed, summed within the group. Mixed units are summed
     #: separately by ``unit`` so seconds and tokens never land in one number.
     unit: str
@@ -126,7 +131,7 @@ async def get_costs(
         since=window_since.isoformat(),
         until=window_until.isoformat(),
         rows=len(rows),
-        total_usd_cents=sum(row.cost_usd_cents for row in rows),
+        total_usd_cents=millicents_to_cents(sum(row.cost_usd_millicents for row in rows)),
     )
 
     return CostReportOut(
@@ -137,7 +142,7 @@ async def get_costs(
             plan: alert_threshold_usd_cents(plan, settings=settings)
             for plan in ("free", "basic", "pro")
         },
-        total_usd_cents=sum(row.cost_usd_cents for row in rows),
+        total_usd_cents=millicents_to_cents(sum(row.cost_usd_millicents for row in rows)),
         total_entries=sum(row.calls for row in rows),
         rows=rows,
     )
@@ -198,7 +203,7 @@ async def _aggregate(
         sa.select(
             axis.label("key"),
             CostLedger.unit,
-            sa.func.sum(CostLedger.cost_usd_cents_est).label("cost"),
+            sa.func.sum(CostLedger.cost_usd_millicents_est).label("cost"),
             sa.func.sum(CostLedger.quantity).label("quantity"),
             sa.func.count().label("calls"),
         )
@@ -208,14 +213,16 @@ async def _aggregate(
         )
         .group_by(axis, CostLedger.unit)
         # Most expensive first: the dashboard is read to find the problem.
-        .order_by(sa.func.sum(CostLedger.cost_usd_cents_est).desc(), axis)
+        .order_by(sa.func.sum(CostLedger.cost_usd_millicents_est).desc(), axis)
     )
 
     return [
         CostRowOut(
             key=_render_key(row.key),
             unit=row.unit,
-            cost_usd_cents=int(row.cost),
+            # Summed in thousandths, rounded once per row of the report (D-136).
+            cost_usd_cents=millicents_to_cents(int(row.cost)),
+            cost_usd_millicents=int(row.cost),
             quantity=float(row.quantity),
             calls=int(row.calls),
         )

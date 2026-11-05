@@ -44,8 +44,9 @@ _BAD_BAND: Final = (10.0, 40.0)
 #: and the PRD 11.2 guardrails untestable under an all-fake configuration,
 #: which is the one configuration CI runs. Rounded up rather than down, per the
 #: base contract's "conservatively overestimate when unknown". Not a business
-#: threshold — those live in CONFIG_REFERENCE.md.
-_COST_USD_CENTS: Final = 1
+#: threshold — those live in CONFIG_REFERENCE.md. One cent exactly, so every
+#: amount the guardrail tests reason about stays a whole number (D-136).
+_COST_USD_MILLICENTS: Final = 1000
 
 
 def _stable_digest(reference_text: str | None, audio: bytes) -> int:
@@ -125,7 +126,7 @@ class FakeScorer(PronunciationScorer):
                 "audio_format": audio_format,
                 "audio_bytes": len(audio),
             },
-            cost_usd_cents=_COST_USD_CENTS,
+            cost_usd_millicents=_COST_USD_MILLICENTS,
         )
 
     def _reject(
@@ -178,7 +179,9 @@ class FakeScorer(PronunciationScorer):
 
 def _failure(code: str, message: str) -> PronunciationResult:
     """No cost: nothing was assessed, so nothing should reach the ledger."""
-    return PronunciationResult(ok=False, error_code=code, error_message=message, cost_usd_cents=0)
+    return PronunciationResult(
+        ok=False, error_code=code, error_message=message, cost_usd_millicents=0
+    )
 
 
 __all__ = ["BAD_MARKER", "FakeScorer"]

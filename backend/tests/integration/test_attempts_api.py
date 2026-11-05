@@ -508,8 +508,9 @@ def spent(execute: Execute, user_id: uuid.UUID, cents: int, *, days_ago: int = 0
     """Ledger rows placed in the past, which no endpoint can do."""
     execute(
         "INSERT INTO cost_ledger (occurred_at, user_id, provider, unit, quantity, "
-        " cost_usd_cents_est, ref) "
-        "VALUES (now() - make_interval(days => :d), :u, 'fake', 'calls', 1, :c, 'attempt')",
+        " cost_usd_cents_est, cost_usd_millicents_est, ref) "
+        "VALUES (now() - make_interval(days => :d), :u, 'fake', 'calls', 1, :c, :c * 1000, "
+        "'attempt')",
         d=days_ago,
         u=user_id,
         c=cents,
@@ -644,6 +645,23 @@ async def test_the_learner_is_not_told_what_they_cost(
 
 
 # ------------------------------------------------------------------- refusals
+
+
+async def test_many_calls_below_a_cent_do_not_throttle_early(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """D-136. A hundred assessments at 0.111 cents are 11.1 cents, under Free's
+    line at 23. Rounded a row at a time they were a dollar, and throttled."""
+    user_id = await sign_in(client, settings)
+    headers = await authenticated(client)
+    for _ in range(100):
+        execute(
+            "INSERT INTO cost_ledger (user_id, provider, unit, quantity, cost_usd_cents_est, "
+            " cost_usd_millicents_est, ref) VALUES (:u, 'azure', 'calls', 1, 1, 111, 'attempt')",
+            u=user_id,
+        )
+
+    assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 201
 
 
 async def test_the_daily_cap_refuses_before_anything_is_scored(

@@ -52,6 +52,7 @@ _FFMPEG_HINT: Final = "convert with: ffmpeg -i IN -ar 16000 -ac 1 -sample_fmt s1
 #: otherwise, and each call is rounded up — base.py asks for a conservative
 #: overestimate when the real figure is unknown. The free tier bills nothing.
 _USD_CENTS_PER_HOUR: Final = 200
+_MILLICENTS_PER_CENT: Final = 1000
 
 #: Azure reports offsets and durations in 100-nanosecond ticks.
 _TICKS_PER_MS: Final = 10_000
@@ -199,9 +200,13 @@ def inspect_audio(
 
 
 def estimate_cost(seconds: float | None) -> int:
-    """US cents, rounded up. Unknown length is billed as the maximum."""
+    """Thousandths of a US cent, rounded up (D-136). Unknown length is billed as the maximum.
+
+    A four-second recording is about 0.2 cents: reported in whole cents it
+    would round to one, and a month of them would look five times dearer.
+    """
     length = _MAX_SECONDS if seconds is None else seconds
-    return math.ceil(length * _USD_CENTS_PER_HOUR / 3600)
+    return math.ceil(length * _USD_CENTS_PER_HOUR * _MILLICENTS_PER_CENT / 3600)
 
 
 def parse(body: Mapping[str, Any], *, language: Language, cost: int) -> PronunciationResult:
@@ -234,7 +239,7 @@ def parse(body: Mapping[str, Any], *, language: Language, cost: int) -> Pronunci
             tone_score=None,
             words=words,
             raw=raw,
-            cost_usd_cents=cost,
+            cost_usd_millicents=cost,
         )
     except (KeyError, IndexError, TypeError, ValueError) as error:
         return _failure(
@@ -281,7 +286,7 @@ def _failure(
     code: str, message: str, *, cost: int = 0, raw: dict[str, Any] | None = None
 ) -> PronunciationResult:
     return PronunciationResult(
-        ok=False, error_code=code, error_message=message, cost_usd_cents=cost, raw=raw or {}
+        ok=False, error_code=code, error_message=message, cost_usd_millicents=cost, raw=raw or {}
     )
 
 

@@ -3223,3 +3223,37 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   会话存取。10 个变异全部被杀死（途中补了一条：端到端测试原先没有断言遮词轮保留高棉语提示）。
 - 回退成本：低。`DRILL_MASKED_ROUNDS=0` 即关闭。
 - 影响范围：`bot/{flow,handlers,session,api_client,main}.py`、`core/config.py`、`docs/CONFIG_REFERENCE.md`、`.env.example`。
+
+## D-136 评分成本按实际用量记账（千分之一美分）；试运营上限 500 美分；支付开通前只邀请
+
+- 日期：2026-11-05（三项均由项目所有者拍板）
+- 背景：交叉验证与 Q2–Q4 的测试里反复撞到同一件事：评分成本**逐次向上取整到 1 美分**记账，
+  而一次 4 秒评测实际约 0.11 美分。按 D-070 的护栏，Free 用户每月录约 23 段（不到 1 课）就被限流，
+  Basic 约 68 段（不到 2 课）。成本看板上的数字也虚高约 10 倍。
+- **决定一：按实际用量记账（方案 A）**。
+  1. **规范接口改动（经项目所有者批准）**：`PronunciationResult.cost_usd_cents` → `cost_usd_millicents`
+     （千分之一美分的整数）。`interfaces/scoring_base.py` 与 `services/scoring/base.py` 同步修改、保持一致。
+     只改评分：TTS、LLM、支付仍按整美分报，它们不进每用户护栏。
+  2. **账本新增 `cost_usd_millicents_est`**（BIGINT，可逆迁移，旧行回填 = 美分 × 1000）。原美分列保留为
+     「本行向上取整」，只供逐行阅读。**所有汇总都先按千分之一美分相加、最后取整一次**：成本护栏、
+     `/admin/costs` 的分组与总计（报表每行另带 `cost_usd_millicents`）。
+  3. `record()` 接受美分或千分之一美分**二选一**，其余调用方不用改；两种单位都必须是整数（R4）。
+     CLAUDE.md 的 R4 相应补了一句。
+  4. FakeScorer 仍记恰好 1 美分（1000），测试里关于护栏的金额推算不受影响。
+     m0 的 Azure 评测按时长估算到千分之一美分：一段 4 秒约 0.22 美分（按 $2/小时的保守上限）。
+  5. **各档上限仍然按美分配置、按档位独立**（Free / Basic / Pro / 试运营），改配置即生效。
+     项目所有者明确要求这一点：成本上限要随定价来定。
+- **决定二：试运营测试者每月成本上限 500 美分**（`COST_CAP_TRIAL_USD_CENTS_MONTHLY=500`）。
+  代码默认仍是 45（与 Basic 相同，「加进名单不自动放宽花钱」，D-131），**500 在部署配置里设**。
+- **决定三：支付开通前只邀请、不公开**。测试者走 `TRIAL_TELEGRAM_IDS`；Bot 的用户名不公开推广。
+  **目前没有技术上拒绝非名单用户**——陌生人找到 Bot 仍会以免费档使用；若需要强制，另立条目。
+  支付接通时再在「免费档按课限」与「前几课免费」之间选。
+- 顺带记下的事实：即使记账准确，Q6 的两轮遮词让每课录音约 39 段，**Basic 用户每月约 10 课达到
+  PRD 11.2 的 0.45 美元上限、约 15 课被限流**（HSK1 共 48 课）。要让 Basic 学更多，调 Basic 上限或减少遮词轮数，都是配置。
+- 测试：账本单位与取整、二选一、整数约束；护栏（100 次 0.111 美分不触发限流）；报表（组内与跨组都先加后取整）；
+  迁移回填与可逆；表结构守卫（DDL、模型、迁移三方一致）。10 个变异全部被杀死
+  （途中补了一个：原先报表只有一组，「先加后取整」与「各组取整再加」无法区分）。
+- 回退成本：中。降级迁移即删除新列，美分列从未改动；接口字段改名要同步改回。
+- 影响范围：`interfaces/scoring_base.py`、`services/scoring/{base,fake}.py`、`services/cost_ledger.py`、
+  `services/entitlements/cost_guard.py`、`api/v1/{attempts,admin}.py`、`models/commerce.py`、
+  `alembic/versions/b3c1d2e4f5a6_*`、`docs/DATA_MODEL.sql`、`m0/`、`CLAUDE.md`（R4）、`docs/CONFIG_REFERENCE.md`。

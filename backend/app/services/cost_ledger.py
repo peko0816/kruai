@@ -25,7 +25,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Final, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,13 +60,28 @@ class UnledgeredCallError(RuntimeError):
     """
 
 
+#: Thousandths of a US cent in a cent. The unit costs are summed in (D-136).
+MILLICENTS_PER_CENT: Final = 1000
+
+
+def millicents_to_cents(millicents: int) -> int:
+    """Rounded up: a total of 0.4 cents still cost something, and the ceiling
+    is checked against what was spent, so the rounding goes against us."""
+    return -(-millicents // MILLICENTS_PER_CENT)
+
+
 @dataclass(frozen=True)
 class RecordedCost:
-    """One line of spending."""
+    """One line of spending, held in thousandths of a cent."""
 
     unit: LedgerUnit
     quantity: float
-    cost_usd_cents: int
+    cost_usd_millicents: int
+
+    @property
+    def cost_usd_cents(self) -> int:
+        """This line alone, rounded up — for reading a row, never for adding rows up."""
+        return millicents_to_cents(self.cost_usd_millicents)
 
 
 @dataclass
@@ -78,32 +93,54 @@ class PendingEntry:
     user_id: uuid.UUID | None = None
     costs: list[RecordedCost] = field(default_factory=list)
 
-    def record(self, *, unit: LedgerUnit, quantity: float, cost_usd_cents: int) -> None:
-        """Report one unit of spend. Call it more than once for a batch.
+    def record(
+        self,
+        *,
+        unit: LedgerUnit,
+        quantity: float,
+        cost_usd_cents: int | None = None,
+        cost_usd_millicents: int | None = None,
+    ) -> None:
+        """Report one unit of spend, in whole cents or in thousandths of one.
+
+        Exactly one of the two. Thousandths are for calls that cost a fraction
+        of a cent each — a pronunciation assessment — where reporting whole
+        cents would round every call up and overstate a month tenfold (D-136).
+        Call it more than once for a batch.
 
         Raises:
-            TypeError: cost is not an int. The column is ``_usd_cents``, so R4
-                applies — and bool slips past a plain isinstance check.
+            TypeError: cost is not an int, or both or neither were given. R4
+                applies to either unit — and bool slips past a plain isinstance.
             ValueError: a negative quantity or cost, which would silently pull
                 down whatever aggregate reads this table.
         """
-        if isinstance(cost_usd_cents, bool) or not isinstance(cost_usd_cents, int):
-            raise TypeError(
-                f"cost_usd_cents must be int, got {type(cost_usd_cents).__name__}; "
-                "float money is a bug"
-            )
-        if cost_usd_cents < 0:
-            raise ValueError(f"cost_usd_cents must be >= 0, got {cost_usd_cents}")
+        if (cost_usd_cents is None) == (cost_usd_millicents is None):
+            raise TypeError("give exactly one of cost_usd_cents and cost_usd_millicents")
+        name, value = (
+            ("cost_usd_cents", cost_usd_cents)
+            if cost_usd_cents is not None
+            else ("cost_usd_millicents", cost_usd_millicents)
+        )
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be int, got {type(value).__name__}; float money is a bug")
+        if value < 0:
+            raise ValueError(f"{name} must be >= 0, got {value}")
         if quantity < 0:
             raise ValueError(f"quantity must be >= 0, got {quantity}")
 
+        millicents = value * MILLICENTS_PER_CENT if cost_usd_cents is not None else value
         self.costs.append(
-            RecordedCost(unit=unit, quantity=float(quantity), cost_usd_cents=cost_usd_cents)
+            RecordedCost(unit=unit, quantity=float(quantity), cost_usd_millicents=millicents)
         )
 
     @property
+    def total_usd_millicents(self) -> int:
+        return sum(cost.cost_usd_millicents for cost in self.costs)
+
+    @property
     def total_usd_cents(self) -> int:
-        return sum(cost.cost_usd_cents for cost in self.costs)
+        """The whole entry, summed first and rounded once."""
+        return millicents_to_cents(self.total_usd_millicents)
 
 
 class CostLedger:
@@ -157,6 +194,7 @@ class CostLedger:
                         unit=cost.unit,
                         quantity=cost.quantity,
                         cost_usd_cents_est=cost.cost_usd_cents,
+                        cost_usd_millicents_est=cost.cost_usd_millicents,
                         ref=pending.ref,
                     )
                     for cost in pending.costs
@@ -184,10 +222,12 @@ class CostLedger:
 
 
 __all__ = [
+    "MILLICENTS_PER_CENT",
     "CostLedger",
     "LedgerRef",
     "LedgerUnit",
     "PendingEntry",
     "RecordedCost",
     "UnledgeredCallError",
+    "millicents_to_cents",
 ]
