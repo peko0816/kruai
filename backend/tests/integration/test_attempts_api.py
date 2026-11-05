@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -27,6 +28,7 @@ import pytest
 import sqlalchemy as sa
 
 from app.core.config import Settings
+from app.core.payloads import qa_payload
 from app.services.scoring.fake import BAD_MARKER
 from tests.integration.conftest import Execute, Rows, auth_header, client_for, sign_in, token_for
 
@@ -343,6 +345,56 @@ async def test_an_open_question_is_assessed_without_a_reference(
     assert body["scores"]["completeness"] is None
     assert body["words"] == []
     assert rows("SELECT count(*) FROM attempts") == [(1,)]
+
+
+async def test_a_fixed_answer_question_is_scored_against_its_answer(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute
+) -> None:
+    """PRD 4.1: when the reference text is known, scripted. FakeScorer fails
+    anything whose reference carries the marker, which proves the sample answer
+    reached the scorer (D-132)."""
+    execute(
+        "UPDATE lesson_items SET payload = CAST(:p AS jsonb) WHERE id = :id",
+        p=json.dumps(
+            qa_payload(
+                hskk_task_type="listen_and_repeat",
+                prompt_zh="请说:我要水。",
+                prompt_km="សូមនិយាយ",
+                sample_answer_zh=f"我要水。{BAD_MARKER}",
+            )
+        ),
+        id=seeded["qa"],
+    )
+    headers = await authenticated(client)
+
+    body = (await attempt(client, seeded["qa"], headers=headers)).json()
+
+    assert body["passed"] is False
+    assert body["scores"]["completeness"] is not None, "scripted scoring reports completeness"
+
+
+async def test_an_answer_in_the_learner_s_own_words_stays_open(
+    client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], execute: Execute
+) -> None:
+    """listen_and_answer has no single right sentence; the sample is one of many."""
+    execute(
+        "UPDATE lesson_items SET payload = CAST(:p AS jsonb) WHERE id = :id",
+        p=json.dumps(
+            qa_payload(
+                hskk_task_type="listen_and_answer",
+                prompt_zh="你要什么?",
+                prompt_km="តើអ្នកចង់បានអ្វី?",
+                sample_answer_zh=f"我要水。{BAD_MARKER}",
+            )
+        ),
+        id=seeded["qa"],
+    )
+    headers = await authenticated(client)
+
+    body = (await attempt(client, seeded["qa"], headers=headers)).json()
+
+    assert body["passed"] is True
+    assert body["scores"]["completeness"] is None
 
 
 async def test_an_item_without_a_concept_scores_but_advances_nothing(

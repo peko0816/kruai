@@ -3128,3 +3128,28 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。清空名单即回到原状。
 - 影响范围：`core/config.py`、`services/entitlements/{plan,cost_guard}.py`、
   `api/v1/{attempts,lessons,me}.py`、`docs/CONFIG_REFERENCE.md`、`.env.example`。
+
+## D-132 问答：有固定答案的题对照答案评分；答完播放标准答案
+
+- 日期：2026-11-05（项目所有者批准，BACKLOG Q3）
+- 背景：交叉验证（D-130）发现，问答一律不对照原文评分，`passed` 只代表「发音清楚」——说什么都能过；
+  答完也只有一句「xx/100」，没有示范。PRD 4.1 要求「参考文本已知时一律用 scripted」，并回「正确示范」。
+  HSK1 的 144 道问答里有 89 道是「听后重复」，答案就是题目里的那一句。
+- 选择：
+  1. **HSKK 题型 `listen_and_repeat`、`read_aloud` 对照 `sample_answer_zh` 评分**（scripted）。
+     `listen_and_answer`、`answer_questions` 等用学员自己的话作答，没有唯一文本可对照，仍不对照原文评分。
+  2. **标准答案录音在打包时生成**（`PackDialogue.sample_answer_audio_zh`），导入时把发布后的 URL 写进
+     问答条目的 payload（`sample_answer_audio_url`）。**不另建 `media_assets` 行**：那张表每个条目一条音频，
+     由 `media.resolve()` 按套餐与省流量模式选择；这是答完之后才听的第二段录音，不参与那套选择。
+  3. **Bot 只在这道题结束后给出答案**：通过、或用完重试次数时，在评分之后发答案文字 + 录音。
+     **重试前不给**——否则「听后回答」类的题等于先看答案。
+  4. **新增 i18n key `bot.model_answer`，三种语言的值都是 `{text}`**：只显示答案本身，不加任何文字，
+     所以不需要译者，不会让 `make i18n-strict` 这道上线闸门变红。等下一批文案交给译者时可以再加一个前缀。
+  5. **运行时仍不调用 TTS、不调用 LLM**（R1）。LLM 纠错（PRD 4.1 的「高棉语纠错说明」）留到试运营之后再定。
+- 兼容性：`PackDialogue` 多了一个字段，**旧的内容包文件会校验和不符**。旧包本来就早于 D-130，
+  要重新打包，不导入。
+- 验证：真实 HSK1 全量重新打包（1112 段音频），144 道问答全部带标准答案录音；第 1 课的「听后重复」
+  对照答案评分（报出了完整度），另两道开放题仍只评发音；23 次录音全部正常。
+- 回退成本：低。
+- 影响范围：`pipeline/{pack,build_pack,import_pack}.py`、`app/core/payloads.py`、`app/api/v1/attempts.py`、
+  `bot/{flow,api_client}.py`、三个 locale 文件。

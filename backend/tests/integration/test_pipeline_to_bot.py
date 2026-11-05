@@ -100,6 +100,9 @@ async def test_imported_content_can_be_learned_end_to_end(
 
     finished = await conversation.on_voice(LEARNER, audio=AUDIO)
     assert "Lesson finished" in finished[-1].text
+    # The model answer, shown and played once the question is behind them (D-132).
+    answer = next(m for m in finished if m.text == draft.dialogues[0].sample_answer_zh)
+    assert answer.audio_url is not None and answer.audio_url.startswith(CDN)
 
     # Scored, not crashed: one attempt per spoken step, and the lesson closed.
     assert rows("SELECT count(*) FROM attempts") == [(3,)]

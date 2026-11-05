@@ -13,6 +13,7 @@
   "bot.lesson_resumed": "Continuing {title}, step {step} of {count}.",
   "bot.lesson_started": "{title} — {count} steps.",
   "bot.lesson_stopped": "Lesson stopped. Send /learn to pick it up again.",
+  "bot.model_answer": "{text}",
   "bot.no_content": "No lessons are available yet.",
   "bot.not_in_lesson": "No lesson in progress. Send /learn to start one.",
   "bot.payments_unavailable": "Paid plans are not available yet. Everything in the free tier still works.",

@@ -13,6 +13,7 @@
   "bot.lesson_resumed": "បន្ត​ {title}, ជំហានទី {step} of {count}",
   "bot.lesson_started": "{title} — សរុប{count}  ជំហាន",
   "bot.lesson_stopped": "មេរៀនបានផ្អាក សូមបញ្ជូន /learn ដើម្បីបន្ត",
+  "bot.model_answer": "{text}",
   "bot.no_content": "ឥឡូវនេះមិនមានមេរៀនដែលអាចប្រើប្រាស់បាននោះទេ",
   "bot.not_in_lesson": "មិនមានមេរៀនកំពុងដំណើរការនោះទេ សូមបញ្ជូន /learn ដើម្បី ចាប់ផ្តើម",
   "bot.payments_unavailable": "ការគិតថ្លៃមិនទាន់ដាក់ដំណើរការនៅឡើយទេ មុខងារទាំងអស់ដែលមាននៅក្នុងកញ្ចប់ឥតគិតថ្លៃនៅតែអាចប្រើប្រាស់បានធម្មតា",

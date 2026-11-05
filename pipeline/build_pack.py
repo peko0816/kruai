@@ -171,6 +171,9 @@ async def build(
                 sample_answer_zh=dialogue.sample_answer_zh,
                 prompt_audio_zh=await synth.say(dialogue.prompt_zh, language="zh", provider=zh),
                 prompt_audio_km=await synth.say(dialogue.prompt_km, language="km", provider=km),
+                sample_answer_audio_zh=await synth.say(
+                    dialogue.sample_answer_zh, language="zh", provider=zh
+                ),
             )
             for dialogue in concept.dialogues
         ]

@@ -234,6 +234,8 @@ def _step_from(item: dict[str, Any]) -> Step:
         audio_url=media.get("primary_url"),
         video_url=media.get("video_url"),
         disclaimer_key=media.get("disclaimer_key"),
+        answer_text=_answer_of(item["item_type"], payload),
+        answer_audio_url=payload.get(payloads.SAMPLE_ANSWER_AUDIO_URL) or None,
     )
 
 
@@ -247,6 +249,14 @@ _SHOWN: Final[dict[str, tuple[str, ...]]] = {
     "vocab": (payloads.TARGET_TEXT, payloads.PINYIN, payloads.KM_GLOSS),
     "qa": (payloads.PROMPT_ZH, payloads.PROMPT_KM),
 }
+
+
+def _answer_of(item_type: str, payload: Mapping[str, Any]) -> str:
+    """A question's model answer; nothing for any other kind of step."""
+    if item_type != "qa":
+        return ""
+    answer = payload.get(payloads.SAMPLE_ANSWER_ZH)
+    return answer.strip() if isinstance(answer, str) else ""
 
 
 def text_of(item_type: str, payload: Mapping[str, Any]) -> str:
