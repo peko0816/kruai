@@ -75,10 +75,14 @@ class Outgoing:
 class Conversation:
     """One learner's side of the bot, with no Telegram types in sight."""
 
-    def __init__(self, api: KruaiApi, sessions: SessionStore, *, max_retry: int) -> None:
+    def __init__(
+        self, api: KruaiApi, sessions: SessionStore, *, max_retry: int, masked_rounds: int = 0
+    ) -> None:
         self._api = api
         self._sessions = sessions
         self._max_retry = max_retry
+        #: DRILL_MASKED_ROUNDS (D-135); 0 keeps every drill to one round in full.
+        self._masked_rounds = masked_rounds
 
     async def on_start(self, learner: Learner) -> list[Outgoing]:
         return _render(
@@ -126,7 +130,8 @@ class Conversation:
                 stored = None
             if stored is not None:
                 lesson = await self._api.lesson(token, stored.lesson_id)
-                return await self._play(learner, lesson, resume(lesson, stored), token)
+                turn = resume(lesson, stored, masked_rounds=self._masked_rounds)
+                return await self._play(learner, lesson, turn, token)
 
             lesson_id = await self._api.next_lesson_id(token)
             if lesson_id is None:
@@ -199,6 +204,7 @@ class Conversation:
             passed=bool(result["passed"]),
             score=float(result["scores"]["pron"] or 0.0),
             max_retry=self._max_retry,
+            masked_rounds=self._masked_rounds,
             marked=mark_weak(
                 result.get("reference_text") or "",
                 tuple((str(w["word"]), bool(w["weak"])) for w in result.get("words", ())),

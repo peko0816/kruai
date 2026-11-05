@@ -69,6 +69,7 @@
 |---|---|---|
 | `SCORING_PASS_THRESHOLD` | `60.0` | `[M0]` 及格线。M0-1 给出真实分布后必须重新校准 |
 | `SCORING_MAX_RETRY` | `3` | 单条最多重试次数 |
+| `DRILL_MASKED_ROUNDS` | `2` | `[$]` 跟读通过后再遮词练几轮（PRD 3.1「跟读→逐步遮词」）：第一轮遮一半，最后一轮全遮。**每轮每课多约 8 次录音**，计入额度与成本。0 为关闭（D-135，项目所有者定为 2） |
 | `SCORING_TIMEOUT_MS` | `8000` | 超时即降级，不扣额度 |
 | `MASTERY_DELTA_BASE` | `40.0` | `delta = (score - pass_threshold) / base` |
 | `MASTERY_WEIGHT_DRILL` | `0.6` | |

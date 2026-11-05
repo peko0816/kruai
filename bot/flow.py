@@ -20,6 +20,7 @@ Two things it deliberately does not decide:
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, replace
 from typing import Final, Literal
@@ -56,6 +57,10 @@ class Step:
     #: the learner — passed, or out of tries — and never before (D-132).
     answer_text: str = ""
     answer_audio_url: str | None = None
+    #: A drill's sentence and its Khmer meaning, kept apart from ``text`` so a
+    #: masked round can hide the one and keep the other as the cue (D-135).
+    target_text: str = ""
+    hint: str = ""
 
     @property
     def expects_voice(self) -> bool:
@@ -87,13 +92,16 @@ class Session:
     #: asked for again, and re-reading the queue mid-review would reshuffle it:
     #: every attempt moves a concept's due date.
     review_steps: tuple[Step, ...] = ()
+    #: Which masked round of the current drill the learner is on; 0 is the
+    #: sentence in full (D-135). Starts again at 0 on every step.
+    mask_round: int = 0
 
     @property
     def is_review(self) -> bool:
         return bool(self.review_steps)
 
     def at(self, index: int) -> Session:
-        return replace(self, step_index=index, attempts_used=0)
+        return replace(self, step_index=index, attempts_used=0, mask_round=0)
 
 
 @dataclass(frozen=True)
@@ -159,7 +167,7 @@ def review_lesson(session: Session) -> Lesson:
     return Lesson(lesson_id=session.lesson_id, title="", steps=session.review_steps)
 
 
-def resume(lesson: Lesson, session: Session) -> Turn:
+def resume(lesson: Lesson, session: Session, *, masked_rounds: int = 0) -> Turn:
     """Pick a lesson back up where the learner left it.
 
     A step index past the end means the lesson grew shorter under them — a pack
@@ -177,7 +185,7 @@ def resume(lesson: Lesson, session: Session) -> Turn:
             "count": len(lesson.steps),
         },
     )
-    return _present(lesson, session, preface=(preface,))
+    return _present(lesson, session, preface=(preface,), masked_rounds=masked_rounds)
 
 
 #: Around the characters a learner should look at again. Brackets rather than
@@ -212,6 +220,40 @@ def mark_weak(reference: str, words: tuple[tuple[str, bool], ...]) -> str | None
     return "".join(pieces).replace(WEAK_CLOSE + WEAK_OPEN, "")
 
 
+#: Item types practised again with words hidden once said in full: PRD 3.1's
+#: "跟读→逐步遮词". Vocab items are a word or two already, and a question has
+#: its own form.
+MASKED_ITEM_TYPES: Final[frozenset[str]] = frozenset({"drill"})
+
+#: What stands in for a hidden character. Written as an escape because the
+#: full-width low line looks like an ASCII underscore in most editors.
+MASK: Final = "\uff3f"
+
+_HAN: Final = re.compile(r"[\u4e00-\u9fff]")
+
+
+def mask(sentence: str, *, round_number: int, rounds: int) -> str:
+    """The sentence with ``round_number / rounds`` of its characters hidden.
+
+    Only Han characters are hidden; punctuation stays, so the shape of the
+    sentence is still there to lean on. The last round hides every character —
+    the learner says it from memory. Which ones go first is fixed, not random,
+    so a learner who retries sees the same gaps and a test can say what they are:
+    the k-th character is hidden once ``k % rounds < round_number``.
+    """
+    if rounds <= 0 or round_number <= 0:
+        return sentence
+    pieces: list[str] = []
+    k = 0
+    for char in sentence:
+        if _HAN.match(char):
+            pieces.append(MASK if k % rounds < round_number else char)
+            k += 1
+        else:
+            pieces.append(char)
+    return "".join(pieces)
+
+
 def on_voice_scored(
     lesson: Lesson,
     session: Session,
@@ -220,6 +262,7 @@ def on_voice_scored(
     score: float,
     max_retry: int,
     marked: str | None = None,
+    masked_rounds: int = 0,
 ) -> Turn:
     """React to a scored recording, and either retry the step or move on.
 
@@ -232,26 +275,36 @@ def on_voice_scored(
             learner may send four recordings for one sentence.
         marked: the sentence with its weak words bracketed (``mark_weak``),
             shown right after the score; None when there is nothing to point at.
+        masked_rounds: DRILL_MASKED_ROUNDS. A drill passed in full, or in any
+            round short of the last, is asked for again with more hidden (D-135).
     """
     used = session.attempts_used + 1
     rendered_score = round(score)
     notes = (Reply("bot.weak_words", {"text": marked}),) if marked else ()
+    step = lesson.steps[session.step_index]
 
     if passed:
-        return _advance(
-            lesson, session, (Reply("bot.score_passed", {"score": rendered_score}), *notes)
-        )
+        verdict = (Reply("bot.score_passed", {"score": rendered_score}), *notes)
+        if step.item_type in MASKED_ITEM_TYPES and session.mask_round < masked_rounds:
+            harder = replace(session, attempts_used=0, mask_round=session.mask_round + 1)
+            return Turn(
+                replies=(*verdict, _prompt_for(step, harder.mask_round, masked_rounds)),
+                session=harder,
+                awaiting_voice=True,
+            )
+        return _advance(lesson, session, verdict)
 
     if used > max_retry:
         # Out of tries. The concept keeps the mastery it earned and comes back
-        # through the review queue; nothing here decides that.
-        return _advance(
-            lesson,
-            session,
-            (Reply("bot.score_failed_moving_on", {"score": rendered_score}), *notes),
-        )
+        # through the review queue; nothing here decides that. A learner who
+        # could not recall a masked sentence is shown it before moving on.
+        verdict = (Reply("bot.score_failed_moving_on", {"score": rendered_score}), *notes)
+        if session.mask_round > 0 and step.target_text:
+            verdict += (
+                Reply("bot.model_answer", {"text": step.target_text}, audio_url=step.audio_url),
+            )
+        return _advance(lesson, session, verdict)
 
-    step = lesson.steps[session.step_index]
     return Turn(
         replies=(
             Reply(
@@ -259,7 +312,7 @@ def on_voice_scored(
                 {"score": rendered_score, "used": used, "limit": max_retry + 1},
             ),
             *notes,
-            _prompt_for(step),
+            _prompt_for(step, session.mask_round, masked_rounds),
         ),
         session=replace(session, attempts_used=used),
         awaiting_voice=True,
@@ -281,7 +334,9 @@ def _advance(lesson: Lesson, session: Session, verdict: tuple[Reply, ...]) -> Tu
     return _present(lesson, session.at(next_index), preface=preface)
 
 
-def _present(lesson: Lesson, session: Session, *, preface: tuple[Reply, ...]) -> Turn:
+def _present(
+    lesson: Lesson, session: Session, *, preface: tuple[Reply, ...], masked_rounds: int = 0
+) -> Turn:
     """Show the session's current step, skipping past anything unspeakable.
 
     Explain cards are read and then left behind in the same turn: there is
@@ -293,14 +348,16 @@ def _present(lesson: Lesson, session: Session, *, preface: tuple[Reply, ...]) ->
 
     while index < len(lesson.steps):
         step = lesson.steps[index]
-        replies.append(_prompt_for(step))
+        # Resuming mid-drill keeps the round the learner reached.
+        round_number = session.mask_round if index == session.step_index else 0
+        replies.append(_prompt_for(step, round_number, masked_rounds))
         if step.disclaimer_key is not None:
             # PRD 7.4: the avatar is labelled wherever it appears.
             replies.append(Reply(step.disclaimer_key))
         if step.expects_voice:
             return Turn(
                 replies=tuple(replies),
-                session=session.at(index),
+                session=replace(session.at(index), mask_round=round_number),
                 awaiting_voice=True,
             )
         index += 1
@@ -308,8 +365,16 @@ def _present(lesson: Lesson, session: Session, *, preface: tuple[Reply, ...]) ->
     return Turn(replies=tuple(replies), session=None, finished=True)
 
 
-def _prompt_for(step: Step) -> Reply:
-    """The message for one step, with its recording attached if it has one."""
+def _prompt_for(step: Step, round_number: int = 0, rounds: int = 0) -> Reply:
+    """The message for one step, with its recording attached if it has one.
+
+    A masked round shows the sentence with gaps and its Khmer meaning as the
+    cue — no pinyin and no recording, which would give the hidden words away.
+    """
+    if round_number > 0 and step.target_text:
+        masked = mask(step.target_text, round_number=round_number, rounds=rounds)
+        text = "\n".join(line for line in (masked, step.hint) if line)
+        return Reply(PROMPT_KEYS.get(step.item_type, "bot.explain"), {"text": text})
     return Reply(
         PROMPT_KEYS.get(step.item_type, "bot.explain"),
         {"text": step.text},

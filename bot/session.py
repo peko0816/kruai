@@ -61,6 +61,8 @@ class SessionStore:
                 lesson_id=uuid.UUID(stored["lesson_id"]),
                 step_index=int(stored["step_index"]),
                 attempts_used=int(stored["attempts_used"]),
+                # Absent in sessions stored before masked drills existed (D-135).
+                mask_round=int(stored.get("mask_round", 0)),
                 # Absent in sessions stored before reviews existed (D-133).
                 review_steps=tuple(_step_from(s) for s in stored.get("review_steps", ())),
             )
@@ -82,6 +84,7 @@ class SessionStore:
                     "lesson_id": str(session.lesson_id),
                     "step_index": session.step_index,
                     "attempts_used": session.attempts_used,
+                    "mask_round": session.mask_round,
                     "review_steps": [_step_to(step) for step in session.review_steps],
                 }
             ),
@@ -102,6 +105,8 @@ def _step_to(step: Step) -> dict[str, object]:
         "disclaimer_key": step.disclaimer_key,
         "answer_text": step.answer_text,
         "answer_audio_url": step.answer_audio_url,
+        "target_text": step.target_text,
+        "hint": step.hint,
     }
 
 
@@ -122,6 +127,8 @@ def _step_from(stored: dict[str, object]) -> Step:
         disclaimer_key=optional("disclaimer_key"),
         answer_text=str(stored.get("answer_text") or ""),
         answer_audio_url=optional("answer_audio_url"),
+        target_text=str(stored.get("target_text") or ""),
+        hint=str(stored.get("hint") or ""),
     )
 
 

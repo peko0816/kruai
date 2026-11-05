@@ -66,7 +66,9 @@ async def imported(settings: Settings, db: sa.Engine, tmp_path: Path) -> None:
 
 
 @asynccontextmanager
-async def bot_for(settings: Settings, redis_client: Redis) -> AsyncIterator[Conversation]:
+async def bot_for(
+    settings: Settings, redis_client: Redis, *, masked_rounds: int = 0
+) -> AsyncIterator[Conversation]:
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
@@ -75,6 +77,7 @@ async def bot_for(settings: Settings, redis_client: Redis) -> AsyncIterator[Conv
                 KruaiApi(http, bot_token=BOT_TOKEN),
                 SessionStore(redis_client, ttl_seconds=settings.bot_session_ttl_seconds),
                 max_retry=settings.scoring_max_retry,
+                masked_rounds=masked_rounds,
             )
 
 
@@ -218,3 +221,43 @@ async def test_learn_puts_a_review_down_and_opens_the_lesson(
     # The only lesson is done, so /learn says so — rather than trying to load
     # the review as if it were a lesson, which the API does not know.
     assert "finished every lesson" in replies[0].text
+
+
+# -------------------------------------------------------------- masked drills (D-135)
+
+
+async def test_a_drill_is_said_in_full_then_twice_from_memory(
+    imported: None, settings: Settings, redis_client: Redis, rows: Rows
+) -> None:
+    """PRD 3.1's 跟读→逐步遮词 on imported content: the same sentence three times,
+    each scored against the whole of it, and then the lesson carries on."""
+    draft = a_draft(concepts=1).concepts[0]
+    sentence = draft.target_sentences[0]
+    hidden = "\uff3f"
+    async with bot_for(as_tester(settings), redis_client, masked_rounds=2) as bot:
+        await bot.on_learn(LEARNER)
+        first = await bot.on_voice(LEARNER, audio=AUDIO)
+        second = await bot.on_voice(LEARNER, audio=AUDIO)
+        third = await bot.on_voice(LEARNER, audio=AUDIO)
+
+    assert first_line(first[-1]).count(hidden) == 2, "half of 我要X hidden"
+    assert sentence.pinyin not in first[-1].text
+    assert sentence.km_gloss in first[-1].text, "the meaning stays as the cue"
+    assert first[-1].audio_url is None
+    assert first_line(second[-1]).count(hidden) == 3, "all of it hidden"
+    assert first_line(third[-1]) == f"Say this: {draft.substitutions[0].zh}"
+    assert rows("SELECT count(*) FROM attempts") == [(3,)], "three scored recordings, one drill"
+
+
+async def test_coming_back_mid_round_still_hides_the_words(
+    imported: None, settings: Settings, redis_client: Redis
+) -> None:
+    """/learn after a break resumes the round reached, gaps and all — not the
+    full sentence, which would be the answer."""
+    hidden = "\uff3f"
+    async with bot_for(as_tester(settings), redis_client, masked_rounds=2) as bot:
+        await bot.on_learn(LEARNER)
+        await bot.on_voice(LEARNER, audio=AUDIO)  # said in full; now in round one
+        resumed = await bot.on_learn(LEARNER)
+
+    assert first_line(resumed[-1]).count(hidden) == 2

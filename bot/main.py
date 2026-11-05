@@ -46,7 +46,12 @@ def build_application(settings: Settings) -> Application:  # type: ignore[type-a
         Redis.from_url(settings.redis_url),
         ttl_seconds=settings.bot_session_ttl_seconds,
     )
-    conversation = Conversation(api, sessions, max_retry=settings.scoring_max_retry)
+    conversation = Conversation(
+        api,
+        sessions,
+        max_retry=settings.scoring_max_retry,
+        masked_rounds=settings.drill_masked_rounds,
+    )
 
     application = Application.builder().token(token).build()
     register(application, conversation)
