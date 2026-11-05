@@ -114,7 +114,7 @@
 | D3 | ✅ #20 | `POST /api/v1/attempts` 全链路：额度校验 → scoring → cost_ledger → 落库 → mastery → 复习队列 | B1 B6 C1-C4 | 集成测试用 FakeScorer + 固定音频跑通；失败时不扣额度不写 attempts |
 | D4 | ✅ #21 #22 | `POST /lessons/{id}/complete` + `GET /review/queue` | C3 | 完课后 mastery 与队列正确更新 |
 | D5 | ✅ #23 #24 | `GET /me/entitlements` + `GET /admin/costs`（按 provider/用户/日聚合） | B6 C4 | 成本看板能看到 D3 产生的记账 |
-| D6 | ✅ #25 | Bot 会话状态机：讲解 → drill → vocab → Q&A → 完课；voice note 往返 | D2 D3 | 用 Fake Provider 在真实 Telegram 里走完一个单元 |
+| D6 | ◐ #25（真实内容下修复见 Q1） | Bot 会话状态机：讲解 → drill → vocab → Q&A → 完课；voice note 往返 | D2 D3 | 用 Fake Provider 在真实 Telegram 里走完一个单元。**真实 Telegram 部分尚未执行**（一直没有 Bot token），部署后补验（D-130） |
 | D7 | ✅ #26 #47 #59 #60 #63 | i18n 框架 + `locales/{km,zh,en}.json`；CI 检查 km 无占位符 | A3 | 内联字符串检查通过 |
 | D8a | ✅ #27 #28 #30 #46 | 付费墙 + 下单收单：Free/Basic 限额生效；`POST /payments/checkout` + `POST /payments/webhook/{provider}`；`Money` 值对象与 `core/money.py` | B4 C4 | FakeProvider 下可完成一笔"支付"并开通订阅；验签失败拒绝开通；KHR（0 位小数）与 USD（2 位）都有单测 |
 | D8b | ✅ #29 | **订阅续费双路径**（ARCHITECTURE 3.4）：`renewal_mode` 状态机、grace 期、auto 扣款定时任务 + 重试、manual 提醒定时任务 + 防重复 | D8a | 两条路径各有集成测试；FakeProvider 可分别模拟 `supports_recurring` 为真/假；grace 到期正确降级 |
@@ -198,6 +198,21 @@ D-074（免费额度与成本上限差 3 倍）、D-075（支付调用未记账�
 > lesson_items，覆盖等于迁移）、D-099（**一个 concept 一课**，由项目所有者拍板；
 > 标题暂用中文句型，没有编造高棉语）。D-084 的记账链就此闭合：生成与合成的成本
 > 都以 `ref='content_production'` 落进 `cost_ledger`。
+
+---
+
+## 阶段 Q：部署前质量修复（计划外，交叉验证发现，D-130）
+
+> 2026-11-05 部署打包前，项目所有者要求对 PRD、决策记录与代码做一次交叉验证。
+> 用真实 HSK1 内容跑通整条链路时发现 Q1，其余为体验测试前需要补的 PRD 缺口。
+> 顺序：Q1 → Q2 → Q3 → Q4，之后 E8、E9（提前，已获批）与部署打包。
+
+| # | 状态 | 任务 | 验收 |
+|---|---|---|---|
+| Q1 | ⏳ | 条目内容格式统一约定（`app/core/payloads.py`）；导入、评分、Bot 显示都按它读写；草稿到 Bot 的端到端测试 | 真实内容下跟读/替换录音不再 500，Bot 每步有文字；端到端测试对五处缝的回归全部变红 |
+| Q2 | — | 试运营测试者白名单：名单内按 Basic 对待（不限次数、成本上限放宽），正式免费档规则不变 | 名单内外各有测试；名单为空时行为与现在完全一致 |
+| Q3 | — | 问答改进：有参考答案的题（听后复述）改为对照评分；评分后显示参考答案文字与预生成录音 | PRD 4.1「参考文本已知时一律 scripted」；参考答案音频在打包阶段生成 |
+| Q4 | — | Bot 加 `/review` 复习入口，接 `GET /review/queue` | 有到期内容时能逐条复习；没有时说明 |
 
 ---
 

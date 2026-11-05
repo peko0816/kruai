@@ -3078,3 +3078,31 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。
 - 影响范围：`pipeline/validate.py`、`pipeline/tests/test_validate.py`、`docs/HANDOFF_SHEETS.md`、`docs/BACKLOG.md`；
   草稿与三张表（gitignored）：`zh-HSK1.draft.json`、`zh-HSK1.review3.csv`、`zh-HSK1.confirm3.csv`。
+
+## D-130 条目内容格式统一成一份约定；真实内容端到端测试补上组件之间的缝
+
+- 日期：2026-11-05
+- 背景：部署前的交叉验证（PRD × 代码 × 决策）中，用**真实 HSK1 内容**跑通整条链路时发现：
+  **每一次跟读、替换练习的录音都返回 500，Bot 里每一步的文字都是空的。**
+  D-036 约定评分读取 `payload.target_text`，并写明「这条决策就是给 E 阶段的接口约定」；
+  但 E7 的导入程序写的是 `zh` / `pinyin` / `km_gloss`，Bot 则在猜 `target_text` / `text` / `prompt`。
+  三个组件**各自的测试都是绿的**——每个测试都写入它自己想读的格式。
+  BACKLOG 上 D6 的验收「在真实 Telegram 里走完一个单元」从未真正执行过（一直没有 Bot token），
+  集成测试用的是手写数据，所以这个缝在 M2 代码侧验收时没被看见。
+- 选择：
+  1. **约定只写一处**：`app/core/payloads.py`，每种 item_type 一个 TypedDict 与构造函数。
+     导入程序只通过构造函数写入，API 与 Bot 只通过键名常量读取。
+     放在 `core` 而不是 `models`：Bot 是入口层，只经 HTTP 访问系统（ARCHITECTURE 第 1 节），
+     条目的键名是 API 响应的一部分，不是业务判断；从 `core` 引入不会把任何 ORM 模型带进 Bot。
+  2. **Bot 按类型显示**：讲解 = 句型 + 高棉语讲解；跟读/替换 = 句子 + 拼音 + 高棉语释义；
+     问答 = 中文题目 + 高棉语题目（**不显示参考答案**——那是学员要说出来的）。
+  3. **新增端到端测试** `test_pipeline_to_bot.py`：草稿 → `build` → `import_pack` → API → Bot 走完一课，
+     中间没有任何手写数据。把五处缝（评分键、导入格式、Bot 的三类显示）逐一改回错误状态，测试全部变红。
+  4. 原有 Bot 对话测试的手写 payload 改用同一组构造函数。
+- **教训**：组件各自的绿色不能证明它们彼此对得上。凡是一个组件写、另一个组件读的数据，
+  都要有一个从真实生产者走到真实消费者的测试。
+- 回退成本：低。
+- 影响范围：`app/core/payloads.py`（新增）、`pipeline/import_pack.py`、`app/api/v1/attempts.py`、
+  `bot/api_client.py`、`backend/tests/integration/test_pipeline_to_bot.py`（新增）、
+  `backend/tests/integration/test_bot_conversation.py`、`bot/tests/test_step_text.py`（新增）。
+  **已导入的内容包需要重新导入**（D-098：发新版本）。

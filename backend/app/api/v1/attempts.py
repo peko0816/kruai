@@ -35,6 +35,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
+from app.core import payloads
 from app.core.config import Plan, Settings
 from app.core.errors import (
     AudioTooLarge,
@@ -76,14 +77,15 @@ router = APIRouter(prefix="/attempts", tags=["learning"])
 #: here, rather than a locale string stored twice in the content pack.
 _LANGUAGES: dict[str, Language] = {"zh": Language.ZH_CN, "en": Language.EN_US}
 
-#: Where the target sentence lives in lesson_items.payload. The pack schema is
-#: E1's to define; this is the field D3 reads and E4 must validate (D-036).
+#: Where the target sentence lives in lesson_items.payload (D-036). Defined in
+#: app.core.payloads, which the importer writes through, so the two cannot
+#: drift apart again (D-130).
 #:
 #: Named ``_FIELD`` rather than ``_KEY``: a name ending in _KEY declares that it
 #: holds an i18n message key (bot/i18n_check.py enforces that they exist), and
 #: this is a JSONB field name. Two kinds of "key" that look identical is exactly
 #: what that convention is there to separate.
-TARGET_TEXT_FIELD = "target_text"
+TARGET_TEXT_FIELD = payloads.TARGET_TEXT
 
 #: Item types a learner can speak to. 'explain' is a lecture card.
 SCORABLE_ITEM_TYPES = frozenset({"drill", "vocab", "qa"})

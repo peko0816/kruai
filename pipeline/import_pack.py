@@ -27,7 +27,7 @@ import argparse
 import datetime as dt
 import sys
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -36,6 +36,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.payloads import explain_payload, qa_payload, spoken_payload
 from app.models.commerce import CostLedger
 from app.models.content import Concept as ConceptRow
 from app.models.content import ContentPack, Course, Lesson, LessonItem, MediaAsset
@@ -307,14 +308,14 @@ def _write_items(
 ) -> None:
     position = 0
 
-    def add(item_type: str, payload: dict[str, Any], audio: str) -> None:
+    def add(item_type: str, payload: Mapping[str, Any], audio: str) -> None:
         nonlocal position
         position += 1
         item = LessonItem(
             lesson_id=lesson.id,
             concept_id=concept_row.id,
             item_type=item_type,
-            payload=payload,
+            payload=dict(payload),
             media_type="audio",
             anchor=item_type == "explain",
             sequence=position,
@@ -338,36 +339,40 @@ def _write_items(
             )
         report.items += 1
 
+    # Payloads are built only through app.core.payloads: the API scores
+    # against these keys and the bot renders them (D-036, D-130).
     add(
         "explain",
-        {"pattern": concept.pattern, "km_explanation": concept.km_explanation},
+        explain_payload(pattern=concept.pattern, km_explanation=concept.km_explanation),
         concept.explanation_audio,
     )
     for sentence in concept.target_sentences:
         add(
             "drill",
-            {"zh": sentence.zh, "pinyin": sentence.pinyin, "km_gloss": sentence.km_gloss},
+            spoken_payload(
+                target_text=sentence.zh, pinyin=sentence.pinyin, km_gloss=sentence.km_gloss
+            ),
             sentence.audio,
         )
     for substitution in concept.substitutions:
         add(
             "vocab",
-            {
-                "zh": substitution.zh,
-                "pinyin": substitution.pinyin,
-                "km_gloss": substitution.km_gloss,
-            },
+            spoken_payload(
+                target_text=substitution.zh,
+                pinyin=substitution.pinyin,
+                km_gloss=substitution.km_gloss,
+            ),
             substitution.audio,
         )
     for dialogue in concept.dialogues:
         add(
             "qa",
-            {
-                "hskk_task_type": dialogue.hskk_task_type,
-                "prompt_zh": dialogue.prompt_zh,
-                "prompt_km": dialogue.prompt_km,
-                "sample_answer_zh": dialogue.sample_answer_zh,
-            },
+            qa_payload(
+                hskk_task_type=dialogue.hskk_task_type,
+                prompt_zh=dialogue.prompt_zh,
+                prompt_km=dialogue.prompt_km,
+                sample_answer_zh=dialogue.sample_answer_zh,
+            ),
             dialogue.prompt_audio_zh,
         )
 
