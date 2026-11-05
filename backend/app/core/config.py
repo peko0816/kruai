@@ -181,6 +181,11 @@ class Settings(BaseSettings):
     #: placeholder, not a measured pass mark.
     scoring_pass_threshold: float = Field(default=60.0, ge=0.0, le=100.0)
     scoring_max_retry: int = Field(default=3, ge=0)
+    #: [$] Masked rounds after a drill is said in full (PRD 3.1 跟读→逐步遮词):
+    #: the first hides half the characters, the last all of them. Each round
+    #: is another scored recording per drill, so another eight a lesson
+    #: against the allowance and the cost cap (D-135). 0 turns it off.
+    drill_masked_rounds: int = Field(default=2, ge=0)
     scoring_timeout_ms: int = Field(default=8000, gt=0)
 
     #: Divisor in ``delta = (score - pass_threshold) / base``; zero would raise.

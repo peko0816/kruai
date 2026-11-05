@@ -13,10 +13,12 @@ import uuid
 import pytest
 
 from bot.flow import (
+    MASK,
     Lesson,
     Session,
     Step,
     mark_weak,
+    mask,
     on_voice_scored,
     resume,
     review_lesson,
@@ -440,3 +442,126 @@ def test_no_marked_sentence_no_extra_line() -> None:
     turn = on_voice_scored(unit, session, passed=False, score=40.0, max_retry=MAX_RETRY)
 
     assert "bot.weak_words" not in keys(turn)
+
+
+# ------------------------------------------------------------ masked drills (D-135)
+
+M = MASK
+
+
+def drilling(*rest: str) -> Lesson:
+    drill = Step(
+        item_id=uuid.uuid4(),
+        item_type="drill",
+        text="我要水。\nwǒ yào shuǐ\nខ្ញុំចង់បានទឹក",
+        audio_url="https://cdn.example/d.mp3",
+        target_text="我要水。",
+        hint="ខ្ញុំចង់បានទឹក",
+    )
+    return Lesson(lesson_id=uuid.uuid4(), title="t", steps=(drill, *(step(t) for t in rest)))
+
+
+def test_the_first_round_hides_every_other_character_and_the_last_hides_all() -> None:
+    assert mask("我要水。", round_number=1, rounds=2) == f"{M}要{M}。"
+    assert mask("我要水。", round_number=2, rounds=2) == f"{M}{M}{M}。"
+
+
+def test_punctuation_and_latin_are_never_hidden() -> None:
+    assert mask("你好, OK?", round_number=1, rounds=1) == f"{M}{M}, OK?"
+
+
+def test_round_zero_or_no_rounds_shows_the_sentence() -> None:
+    assert mask("我要水。", round_number=0, rounds=2) == "我要水。"
+    assert mask("我要水。", round_number=1, rounds=0) == "我要水。"
+
+
+def test_a_drill_said_in_full_comes_back_with_gaps() -> None:
+    unit = drilling("vocab")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(
+        unit, session, passed=True, score=90.0, max_retry=MAX_RETRY, masked_rounds=2
+    )
+
+    assert keys(turn) == ["bot.score_passed", "bot.prompt_drill"]
+    prompt = turn.replies[-1]
+    assert prompt.params == {"text": f"{M}要{M}。\nខ្ញុំចង់បានទឹក"}
+    assert prompt.audio_url is None, "the recording would give the gaps away"
+    assert turn.session is not None and turn.session.step_index == 0
+    assert turn.session.mask_round == 1
+
+
+def test_the_last_round_hides_everything_and_passing_it_moves_on() -> None:
+    unit = drilling("vocab")
+    second = on_voice_scored(
+        unit,
+        Session(lesson_id=unit.lesson_id, mask_round=1),
+        passed=True,
+        score=90.0,
+        max_retry=MAX_RETRY,
+        masked_rounds=2,
+    )
+    assert second.replies[-1].params == {"text": f"{M}{M}{M}。\nខ្ញុំចង់បានទឹក"}
+    assert second.session is not None
+
+    done = on_voice_scored(
+        unit, second.session, passed=True, score=90.0, max_retry=MAX_RETRY, masked_rounds=2
+    )
+
+    assert keys(done) == ["bot.score_passed", "bot.prompt_vocab"]
+    assert done.session is not None and done.session.mask_round == 0
+
+
+def test_a_retry_in_a_masked_round_keeps_the_gaps() -> None:
+    unit = drilling("vocab")
+    session = Session(lesson_id=unit.lesson_id, mask_round=1)
+
+    turn = on_voice_scored(
+        unit, session, passed=False, score=30.0, max_retry=MAX_RETRY, masked_rounds=2
+    )
+
+    assert turn.replies[-1].params == {"text": f"{M}要{M}。\nខ្ញុំចង់បានទឹក"}
+    assert turn.session is not None and turn.session.mask_round == 1
+
+
+def test_running_out_of_tries_on_a_masked_round_shows_the_sentence() -> None:
+    unit = drilling("vocab")
+    session = Session(lesson_id=unit.lesson_id, mask_round=2, attempts_used=MAX_RETRY)
+
+    turn = on_voice_scored(
+        unit, session, passed=False, score=30.0, max_retry=MAX_RETRY, masked_rounds=2
+    )
+
+    assert keys(turn)[:2] == ["bot.score_failed_moving_on", "bot.model_answer"]
+    assert turn.replies[1].params == {"text": "我要水。"}
+    assert turn.replies[1].audio_url == "https://cdn.example/d.mp3"
+
+
+def test_vocab_is_not_masked() -> None:
+    unit = lesson("vocab", "drill")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(
+        unit, session, passed=True, score=90.0, max_retry=MAX_RETRY, masked_rounds=2
+    )
+
+    assert turn.session is not None and turn.session.step_index == 1
+
+
+def test_no_rounds_configured_moves_straight_on() -> None:
+    unit = drilling("vocab")
+    session = Session(lesson_id=unit.lesson_id)
+
+    turn = on_voice_scored(unit, session, passed=True, score=90.0, max_retry=MAX_RETRY)
+
+    assert keys(turn) == ["bot.score_passed", "bot.prompt_vocab"]
+
+
+def test_resuming_mid_round_shows_the_gaps_the_learner_had_reached() -> None:
+    unit = drilling("vocab")
+    session = Session(lesson_id=unit.lesson_id, mask_round=2)
+
+    turn = resume(unit, session, masked_rounds=2)
+
+    assert turn.replies[-1].params == {"text": f"{M}{M}{M}。\nខ្ញុំចង់បានទឹក"}
+    assert turn.session is not None and turn.session.mask_round == 2

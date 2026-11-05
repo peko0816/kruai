@@ -240,6 +240,8 @@ def _step_from(item: dict[str, Any]) -> Step:
         video_url=media.get("video_url"),
         disclaimer_key=media.get("disclaimer_key"),
         answer_text=_answer_of(item["item_type"], payload),
+        target_text=_field(payload, payloads.TARGET_TEXT),
+        hint=_field(payload, payloads.KM_GLOSS),
         answer_audio_url=payload.get(payloads.SAMPLE_ANSWER_AUDIO_URL) or None,
     )
 
@@ -254,6 +256,11 @@ _SHOWN: Final[dict[str, tuple[str, ...]]] = {
     "vocab": (payloads.TARGET_TEXT, payloads.PINYIN, payloads.KM_GLOSS),
     "qa": (payloads.PROMPT_ZH, payloads.PROMPT_KM),
 }
+
+
+def _field(payload: Mapping[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _answer_of(item_type: str, payload: Mapping[str, Any]) -> str:

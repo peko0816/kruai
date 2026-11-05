@@ -136,3 +136,17 @@ async def test_a_session_stored_before_reviews_existed_still_loads(
     )
 
     assert await store.load(TELEGRAM_ID) == Session(lesson_id, step_index=2, attempts_used=1)
+
+
+async def test_a_masked_round_and_a_drill_s_parts_survive_the_round_trip(
+    store: SessionStore,
+) -> None:
+    """D-135: resuming mid-drill must not drop the learner back to the full sentence."""
+    drill = Step(
+        item_id=uuid.uuid4(), item_type="drill", text="t", target_text="我要水。", hint="ទឹក"
+    )
+    session = Session(lesson_id=uuid.uuid4(), mask_round=2, review_steps=(drill,))
+
+    await store.save(TELEGRAM_ID, session)
+
+    assert await store.load(TELEGRAM_ID) == session
