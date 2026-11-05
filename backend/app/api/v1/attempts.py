@@ -64,6 +64,7 @@ from app.services.mastery import (
     apply_attempt,
     initial_ease_factor,
     is_passing,
+    is_weak_word,
     schedule_review,
 )
 from app.services.scoring.base import AssessMode, Language, PronunciationResult
@@ -126,6 +127,10 @@ class WordScoreOut(BaseModel):
     word: str
     accuracy: float
     error_type: str | None
+    #: Worth pointing out to the learner: said wrong, left out, or below the
+    #: pass mark. Decided here, against the same SCORING_PASS_THRESHOLD as
+    #: ``passed``, so no client keeps a second copy of the line (D-134).
+    weak: bool
     phonemes: list[PhonemeOut]
 
 
@@ -171,6 +176,9 @@ class AttemptOut(BaseModel):
     scores: ScoresOut
     words: list[WordScoreOut]
     feedback: FeedbackOut
+    #: The sentence the recording was scored against; None for an open answer.
+    #: Sent so a client marks the words on the sentence that was actually used.
+    reference_text: str | None
     #: Absent when the item teaches no concept — there is nothing to advance.
     mastery: MasteryOut | None
     #: Attempts left today; None when the plan has no daily cap.
@@ -314,6 +322,7 @@ async def create_attempt(
         passed=passed,
         mastery=mastery,
         remaining_attempts=consumption.remaining,
+        settings=settings,
     )
 
 
@@ -638,6 +647,7 @@ def _attempt_out(
     passed: bool,
     mastery: tuple[MasteryUpdate, ReviewSchedule] | None,
     remaining_attempts: int | None,
+    settings: Settings,
 ) -> AttemptOut:
     concept_id = target.item.concept_id
     return AttemptOut(
@@ -656,6 +666,9 @@ def _attempt_out(
                 word=word.word,
                 accuracy=word.accuracy,
                 error_type=word.error_type,
+                weak=is_weak_word(
+                    accuracy=word.accuracy, error_type=word.error_type, settings=settings
+                ),
                 phonemes=[
                     PhonemeOut(
                         phoneme=phoneme.phoneme,
@@ -672,6 +685,7 @@ def _attempt_out(
             key=FEEDBACK_PASSED_KEY if passed else FEEDBACK_RETRY_KEY,
             km_explanation=target.km_explanation,
         ),
+        reference_text=target.reference_text,
         mastery=(
             None
             if mastery is None or concept_id is None

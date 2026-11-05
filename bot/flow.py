@@ -180,8 +180,46 @@ def resume(lesson: Lesson, session: Session) -> Turn:
     return _present(lesson, session, preface=(preface,))
 
 
+#: Around the characters a learner should look at again. Brackets rather than
+#: words, so the line needs no translation: it is the sentence itself (D-134).
+WEAK_OPEN: Final = "【"
+WEAK_CLOSE: Final = "】"
+
+
+def mark_weak(reference: str, words: tuple[tuple[str, bool], ...]) -> str | None:
+    """The reference sentence with its weak words bracketed, or None if none are.
+
+    ``words`` is the API's alignment, in order: (word, weak). Each is looked up
+    from where the previous one ended, so a repeated character is marked where
+    it was said. A word not found — an insertion, or the provider tokenising
+    differently from the text — is skipped rather than guessed at. Neighbouring
+    weak words share one bracket: 【桌子】, not 【桌】【子】.
+    """
+    pieces: list[str] = []
+    position = 0
+    found_weak = False
+    for word, weak in words:
+        at = reference.find(word, position) if word else -1
+        if at < 0:
+            continue
+        pieces.append(reference[position:at])
+        pieces.append(f"{WEAK_OPEN}{word}{WEAK_CLOSE}" if weak else word)
+        found_weak = found_weak or weak
+        position = at + len(word)
+    if not found_weak:
+        return None
+    pieces.append(reference[position:])
+    return "".join(pieces).replace(WEAK_CLOSE + WEAK_OPEN, "")
+
+
 def on_voice_scored(
-    lesson: Lesson, session: Session, *, passed: bool, score: float, max_retry: int
+    lesson: Lesson,
+    session: Session,
+    *,
+    passed: bool,
+    score: float,
+    max_retry: int,
+    marked: str | None = None,
 ) -> Turn:
     """React to a scored recording, and either retry the step or move on.
 
@@ -192,12 +230,17 @@ def on_voice_scored(
             mark M0-1 will move.
         max_retry: SCORING_MAX_RETRY. Attempts *after* the first, so 3 means a
             learner may send four recordings for one sentence.
+        marked: the sentence with its weak words bracketed (``mark_weak``),
+            shown right after the score; None when there is nothing to point at.
     """
     used = session.attempts_used + 1
     rendered_score = round(score)
+    notes = (Reply("bot.weak_words", {"text": marked}),) if marked else ()
 
     if passed:
-        return _advance(lesson, session, Reply("bot.score_passed", {"score": rendered_score}))
+        return _advance(
+            lesson, session, (Reply("bot.score_passed", {"score": rendered_score}), *notes)
+        )
 
     if used > max_retry:
         # Out of tries. The concept keeps the mastery it earned and comes back
@@ -205,7 +248,7 @@ def on_voice_scored(
         return _advance(
             lesson,
             session,
-            Reply("bot.score_failed_moving_on", {"score": rendered_score}),
+            (Reply("bot.score_failed_moving_on", {"score": rendered_score}), *notes),
         )
 
     step = lesson.steps[session.step_index]
@@ -215,6 +258,7 @@ def on_voice_scored(
                 "bot.score_failed_retry",
                 {"score": rendered_score, "used": used, "limit": max_retry + 1},
             ),
+            *notes,
             _prompt_for(step),
         ),
         session=replace(session, attempts_used=used),
@@ -222,10 +266,10 @@ def on_voice_scored(
     )
 
 
-def _advance(lesson: Lesson, session: Session, verdict: Reply) -> Turn:
+def _advance(lesson: Lesson, session: Session, verdict: tuple[Reply, ...]) -> Turn:
     """Move past the current step, saying ``verdict`` and the model answer on the way out."""
     step = lesson.steps[session.step_index]
-    preface: tuple[Reply, ...] = (verdict,)
+    preface = verdict
     if step.answer_text:
         # Content, not copy: the key renders the answer and nothing else.
         preface += (

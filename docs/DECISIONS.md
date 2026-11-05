@@ -3180,3 +3180,26 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。
 - 影响范围：`app/api/v1/{review,lessons}.py`、`core/config.py`、`bot/{flow,handlers,session,api_client}.py`、
   三个 locale、`docs/CONFIG_REFERENCE.md`、`.env.example`。
+
+## D-134 评分后在原句里标出读得不好的字：服务器判定，Bot 只加括号
+
+- 日期：2026-11-05（BACKLOG Q5）
+- 背景：评分接口早就返回逐词分数（PRD 10 的 `phonemes[]`），但 Bot 只显示总分。
+  对标产品（Speak）的核心体验是「告诉你哪个字读得不对」——数据有，没展示。
+- 选择：
+  1. **「哪个字算读得不好」由服务器判定**：`is_weak_word()` 放在 `services/mastery/delta.py`，
+     与 `is_passing` 共用 `SCORING_PASS_THRESHOLD`——判为读错或漏读（Mispronunciation / Omission）的一律算，
+     否则低于及格线算。**多读出来的字（Insertion）不算**：原句里没有它的位置可以标。
+     放在服务器而不是 Bot，是因为阈值比较只能有一处（flow.py 的 `passed` 也是同一理由），
+     M0-1 重新标定及格线时这里会跟着动。
+  2. **响应带回评分时用的原句 `reference_text`**（开放式问答为 null），客户端在实际对照的那句上标，不猜。
+  3. **Bot 用【】把字括起来，相邻的合并**：书在【桌子】上。显示的是句子本身，
+     **新 key `bot.weak_words` 在三种语言里都只有 `{text}`，不需要译者**，i18n 上线闸门不受影响。
+  4. **通过了也显示**：总分及格不代表每个字都对；**重试前也显示**——那正是最需要知道的时候。
+  5. 对齐时每个词从上一个词之后找起，重复的字标在实际说的位置；找不到的词跳过，不猜。
+- 测试：纯函数（单字、多字词、相邻合并、重复字、找不到的词）、判定规则（错误类型、及格线边界、插入词）、
+  API（失败全标、通过不标、及格线可配置、开放题无原句）、Bot 对话（标出的句子出现在回复里）。
+  9 个变异全部被杀死。原先「判为读错」这条规则任何集成测试都碰不到（Fake 评分不报错误类型），
+  所以把判定提成纯函数单独测。
+- 回退成本：低。
+- 影响范围：`services/mastery/delta.py`、`api/v1/attempts.py`、`bot/{flow,handlers}.py`、三个 locale。

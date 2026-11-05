@@ -17,6 +17,7 @@ from app.services.mastery.delta import (
     apply_attempt,
     clamp_mastery,
     is_passing,
+    is_weak_word,
     score_delta,
     weight_for,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "due_candidates",
     "initial_ease_factor",
     "is_passing",
+    "is_weak_word",
     "schedule_review",
     "score_delta",
     "weight_for",

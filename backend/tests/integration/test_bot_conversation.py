@@ -432,3 +432,19 @@ async def test_the_bot_authenticates_as_the_learner_it_is_talking_to(
 
     stored = rows("SELECT telegram_id FROM users ORDER BY telegram_id")
     assert stored == [(LEARNER.telegram_id,), (other.telegram_id,)]
+
+
+async def test_a_weak_recording_shows_which_characters_to_look_at(
+    conversation: Conversation, unit: dict[str, uuid.UUID], execute: Execute
+) -> None:
+    """D-134: the sentence comes back with what went wrong bracketed in it."""
+    execute(
+        "UPDATE lesson_items SET payload = CAST(:p AS jsonb) WHERE id = :id",
+        p=json.dumps(spoken_payload(target_text="我要水__BAD__", pinyin="", km_gloss="")),
+        id=unit["drill"],
+    )
+    await conversation.on_learn(LEARNER)
+
+    replies = await conversation.on_voice(LEARNER, audio=AUDIO)
+
+    assert any("【我要水】" in message.text for message in replies)

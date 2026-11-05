@@ -33,5 +33,6 @@
   "bot.status": "计划：{plan}。今日尝试：{used}{limit_suffix}。",
   "bot.status_limit_suffix": "/{limit}",
   "bot.status_unlimited": "",
+  "bot.weak_words": "{text}",
   "bot.welcome": "KruAI — 中文口语练习。发送 /learn 开始课程。"
 }

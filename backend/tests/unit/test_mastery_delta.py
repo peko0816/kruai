@@ -22,6 +22,7 @@ from app.services.mastery import (
     apply_attempt,
     clamp_mastery,
     is_passing,
+    is_weak_word,
     score_delta,
     weight_for,
 )
@@ -337,3 +338,23 @@ def test_mixed_attempts_accumulate_in_both_directions() -> None:
         ).current
 
     assert mastery == pytest.approx(49.7)
+
+
+# ------------------------------------------------------------ weak words (D-134)
+
+
+@pytest.mark.parametrize("error_type", ["Mispronunciation", "Omission"])
+def test_a_word_said_wrong_or_left_out_is_weak_whatever_its_number(error_type: str) -> None:
+    assert is_weak_word(accuracy=95.0, error_type=error_type, settings=settings())
+
+
+def test_an_added_word_is_not_marked() -> None:
+    """An insertion has no place in the reference sentence to bracket."""
+    assert not is_weak_word(accuracy=95.0, error_type="Insertion", settings=settings())
+
+
+def test_a_word_under_the_pass_mark_is_weak_and_one_on_it_is_not() -> None:
+    configured = settings(SCORING_PASS_THRESHOLD="60")
+
+    assert is_weak_word(accuracy=59.9, error_type=None, settings=configured)
+    assert not is_weak_word(accuracy=60.0, error_type="None", settings=configured)
