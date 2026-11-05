@@ -18,7 +18,7 @@ path may call it.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Final
 from xml.sax.saxutils import escape, quoteattr
 
@@ -62,6 +62,25 @@ def ssml(text: str, *, vendor_voice: str, speaking_rate: float) -> str:
         f"<prosody rate={quoteattr(rate)}>{escape(text)}</prosody>"
         "</voice></speak>"
     )
+
+
+#: Azure takes at most fifty voice elements in one SSML document.
+MAX_VOICE_PIECES: Final = 50
+
+
+def ssml_pieces(pieces: Sequence[tuple[str, str, float]]) -> str:
+    """One document, one ``<voice>`` per (vendor voice, text, rate) piece.
+
+    The document's language is the first voice's; each voice speaks its own.
+    """
+    language = "-".join(pieces[0][0].split("-")[:2])
+    body = "".join(
+        f"<voice name={quoteattr(vendor_voice)}>"
+        f"<prosody rate={quoteattr(f'{round((rate - 1) * 100):+d}%')}>{escape(text)}</prosody>"
+        "</voice>"
+        for vendor_voice, text, rate in pieces
+    )
+    return f"<speak version='1.0' xml:lang={quoteattr(language)}>{body}</speak>"
 
 
 class AzureTTS(TTSProvider):
@@ -171,9 +190,73 @@ class AzureTTS(TTSProvider):
             cost_usd_cents=cost,
         )
 
+    async def synthesize_pieces(
+        self, pieces: Sequence[tuple[Voice, str, float]], *, audio_format: str = "mp3"
+    ) -> SynthesisResult:
+        """Several voices in one request, as one recording (D-139).
+
+        Not part of the normative interface: it is the optional capability
+        ``pipeline.build_pack`` looks for when a Khmer explanation quotes
+        Chinese. Asked of Azure as one SSML document, the voice changes come
+        back as ordinary pauses; synthesised piece by piece and joined, each
+        piece carried its own lead-in and tail, and an explanation that switches
+        twenty times sounded chopped up.
+        """
+        if not pieces or not any(text.strip() for _, text, _ in pieces):
+            return _failure("tts.empty_text", "nothing to synthesise")
+        if len(pieces) > MAX_VOICE_PIECES:
+            return _failure(
+                "tts.too_many_voices", f"{len(pieces)} pieces; azure takes {MAX_VOICE_PIECES}"
+            )
+        if audio_format != "mp3":
+            return _failure(
+                "tts.unsupported_format", f"{self.name} emits mp3 only, asked for {audio_format!r}"
+            )
+        resolved: list[tuple[str, str, float]] = []
+        for voice, text, rate in pieces:
+            vendor_voice = self._voices.get(voice)
+            if vendor_voice is None:
+                return _failure("tts.unsupported_voice", f"no azure voice for {voice.value}")
+            if not _MIN_RATE <= rate <= _MAX_RATE:
+                return _failure(
+                    "tts.invalid_speaking_rate",
+                    f"speaking_rate must be within {_MIN_RATE}-{_MAX_RATE}, got {rate}",
+                )
+            resolved.append((vendor_voice, text, rate))
+
+        outcome = await post(
+            self._url,
+            headers={
+                "Ocp-Apim-Subscription-Key": self._key,
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": _OUTPUT_FORMAT,
+                "User-Agent": "kruai-m0",
+            },
+            content=ssml_pieces(resolved).encode(),
+            timeout_seconds=_TIMEOUT_SECONDS,
+            transport=self._transport,
+            sleep=self._sleep,
+        )
+        cost = sum(len(text) for _, text, _ in resolved) // _CHARS_PER_USD_CENT
+        if outcome.response is None:
+            billed = cost if outcome.error == "timeout" else 0
+            return _failure(f"tts.{outcome.error}", outcome.message or "", cost=billed)
+        audio = outcome.response.content
+        if not audio:
+            return _failure("tts.empty_audio", "azure answered 200 with no audio", cost=cost)
+        voices = list(dict.fromkeys(vendor_voice for vendor_voice, _, _ in resolved))
+        return SynthesisResult(
+            ok=True,
+            audio=audio,
+            audio_format="mp3",
+            duration_ms=len(audio) * 8 // _BITS_PER_MS,
+            resolved_voice="+".join(voices),
+            cost_usd_cents=cost,
+        )
+
 
 def _failure(code: str, message: str, *, cost: int = 0) -> SynthesisResult:
     return SynthesisResult(ok=False, error_code=code, error_message=message, cost_usd_cents=cost)
 
 
-__all__ = ["AzureTTS", "ssml"]
+__all__ = ["MAX_VOICE_PIECES", "AzureTTS", "ssml", "ssml_pieces"]
