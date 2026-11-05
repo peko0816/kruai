@@ -489,6 +489,22 @@ async def _reset_quota_if_due(
     await reset.reset_if_due(user_id, timezone=timezone, now=now)
 
 
+def audio_format_of(payload: bytes) -> str:
+    """What the recording is, read from its own first bytes (D-141).
+
+    Not from the upload's filename or content type, which are the client's to
+    get wrong. Telegram sends OGG/Opus; the scorer's default was wav, so before
+    this every voice note would have been refused by a real provider — the
+    fake one does not look. Anything unrecognised is passed on as ``unknown``
+    and refused by the provider as a format it cannot read.
+    """
+    if payload[:4] == b"OggS":
+        return "ogg"
+    if payload[:4] == b"RIFF" and payload[8:12] == b"WAVE":
+        return "wav"
+    return "unknown"
+
+
 async def _assess(
     payload: bytes,
     *,
@@ -513,6 +529,7 @@ async def _assess(
             language=target.language,
             mode=target.mode,
             reference_text=target.reference_text,
+            audio_format=audio_format_of(payload),
         )
         entry.record(unit="calls", quantity=1, cost_usd_millicents=result.cost_usd_millicents)
     return result

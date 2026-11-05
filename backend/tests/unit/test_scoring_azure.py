@@ -1,17 +1,11 @@
-"""The Azure scoring verification adapter (m0/azure/), tested without Azure.
+"""Azure scoring (app/services/scoring/azure.py, BACKLOG E9), tested without Azure.
 
-The TTS adapter and the HTTP layer moved to app/services/ with E8 (D-137);
-their tests moved with them, to backend/tests/unit/.
+Moved from m0/ with E9 (D-141). Nothing here touches the network: every
+request goes to an httpx MockTransport.
 
-Nothing here touches the network: every request goes to an httpx
-MockTransport. That matters more than usual because the first real request
-will be made by the M0 scripts against recordings that took a week to collect,
-and an adapter that mistakes a 429 for a bad recording, or a 44.1 kHz file for
-a silent one, would cost the run rather than a test.
-
-The response fixtures follow Microsoft's published REST examples. They have
-not been checked against a live response yet, which is why the parser is
-tested against both shapes the documentation shows and against garbage.
+The response fixtures follow Microsoft's published REST examples; the flat
+shape is the one the live endpoint returned on 2026-11-05. The parser is still
+tested against the SDK's nested shape and against garbage.
 """
 
 from __future__ import annotations
@@ -26,8 +20,8 @@ import httpx
 import pytest
 
 from app.services.provider_errors import ProviderConfigurationError
+from app.services.scoring.azure import AzureScorer, assessment_header, estimate_cost, parse
 from app.services.scoring.base import AssessMode, Language
-from m0.azure.scoring import AzureScorer, assessment_header, estimate_cost, parse
 from tests.unit.azure_recorder import KEY, Recorder, no_sleep
 
 
@@ -93,13 +87,15 @@ def nested(flat: dict[str, Any]) -> dict[str, Any]:
     return {**flat, "NBest": [new_best]}
 
 
-def scorer(recorder: Recorder) -> AzureScorer:
+def scorer(recorder: Recorder, **kwargs: Any) -> AzureScorer:
+    kwargs.setdefault("usd_cents_per_hour", 200)
     return AzureScorer(
         key=KEY,
         region="eastasia",
         timeout_seconds=1,
         transport=recorder.transport,
         sleep=no_sleep,
+        **kwargs,
     )
 
 
@@ -116,17 +112,18 @@ def test_both_documented_shapes_parse_the_same(shape: dict[str, Any]) -> None:
     assert result.words[2].accuracy == 0.0
 
 
-def test_chinese_has_no_prosody_and_no_tone_score_yet() -> None:
-    """tone_score is what ZH_TONE_MODE decides; filling it in here would
-    answer M0-1's question before M0-1 asked it."""
+def test_chinese_has_tone_and_no_prosody_english_the_reverse() -> None:
+    """PRD section 8: prosody is en-US only; zh-CN carries tone instead, derived
+    from the syllables now that M0-1 has said how (D-140)."""
     shape = {**FLAT, "NBest": [{**FLAT["NBest"][0], "ProsodyScore": 70.0}]}
 
     zh = parse(shape, language=Language.ZH_CN, cost=1)
     en = parse(shape, language=Language.EN_US, cost=1)
 
     assert zh.prosody_score is None
-    assert zh.tone_score is None
+    assert zh.tone_score == 95.0
     assert en.prosody_score == 70.0
+    assert en.tone_score is None
 
 
 def test_no_speech_is_named_as_such() -> None:
@@ -219,27 +216,76 @@ async def test_the_format_refusal_says_how_to_fix_it() -> None:
     assert "ffmpeg" in (result.error_message or "")
 
 
-async def test_unscripted_and_missing_reference_are_refused() -> None:
+async def test_scripted_without_a_reference_and_unscripted_with_one_are_refused() -> None:
+    """base.py: SCRIPTED needs reference_text; UNSCRIPTED must not have one."""
     recorder = Recorder()
 
-    unscripted = await scorer(recorder).assess(
-        wav(), language=Language.ZH_CN, mode=AssessMode.UNSCRIPTED
-    )
     no_reference = await scorer(recorder).assess(
         wav(), language=Language.ZH_CN, mode=AssessMode.SCRIPTED, reference_text=""
     )
+    with_reference = await scorer(recorder).assess(
+        wav(), language=Language.ZH_CN, mode=AssessMode.UNSCRIPTED, reference_text="我要水。"
+    )
 
-    assert unscripted.error_code == "scoring.unsupported_mode"
     assert no_reference.error_code == "scoring.missing_reference"
+    assert with_reference.error_code == "scoring.reference_not_allowed"
     assert recorder.requests == []
+
+
+async def test_an_open_answer_is_assessed_against_what_was_heard() -> None:
+    """Unscripted: an empty reference, no miscue detection, no completeness —
+    tried for real on 2026-11-05 (D-141)."""
+    recorder = Recorder(httpx.Response(200, json=FLAT))
+
+    result = await scorer(recorder).assess(
+        wav(seconds=3), language=Language.ZH_CN, mode=AssessMode.UNSCRIPTED
+    )
+
+    header = json.loads(base64.b64decode(recorder.requests[0].headers["Pronunciation-Assessment"]))
+    assert header["ReferenceText"] == ""
+    assert header["EnableMiscue"] is False
+    assert result.ok
+    assert result.completeness_score is None, "scripted-only (scoring/base.py)"
+    assert result.pron_score == 84.4
+
+
+async def test_tone_is_derived_from_the_syllables_for_chinese_only() -> None:
+    """D-140: the tone digit is the expected tone, so the score is the syllables'."""
+    recorder = Recorder(httpx.Response(200, json=FLAT), httpx.Response(200, json=FLAT))
+
+    zh = await scorer(recorder).assess(
+        wav(), language=Language.ZH_CN, mode=AssessMode.SCRIPTED, reference_text="我要水。"
+    )
+    en = await scorer(recorder).assess(
+        wav(), language=Language.EN_US, mode=AssessMode.SCRIPTED, reference_text="water"
+    )
+
+    assert zh.tone_score == 95.0, "the one syllable FLAT carries, at 95"
+    assert en.tone_score is None
+
+
+def test_parse_tone_mode_is_refused_at_construction() -> None:
+    """So the startup self-check refuses to boot on it (D-140)."""
+    with pytest.raises(ProviderConfigurationError, match="expected"):
+        scorer(Recorder(), tone_mode="parse")
+
+
+async def test_the_price_per_hour_is_configuration() -> None:
+    recorder = Recorder(httpx.Response(200, json=FLAT))
+
+    result = await scorer(recorder, usd_cents_per_hour=100).assess(
+        wav(seconds=36), language=Language.ZH_CN, mode=AssessMode.SCRIPTED, reference_text="x"
+    )
+
+    assert result.cost_usd_millicents == 1000, "36 s at $1 an hour is one cent"
 
 
 def test_scoring_cost_rounds_up_and_assumes_the_worst_when_unknown() -> None:
     """base.py: conservatively overestimate when the real figure is unknown."""
-    assert estimate_cost(0.5) == 28
-    assert estimate_cost(18) == 1000
-    assert estimate_cost(19) == 1056
-    assert estimate_cost(None) == estimate_cost(60)
+    assert estimate_cost(0.5, usd_cents_per_hour=200) == 28
+    assert estimate_cost(18, usd_cents_per_hour=200) == 1000
+    assert estimate_cost(19, usd_cents_per_hour=200) == 1056
+    assert estimate_cost(None, usd_cents_per_hour=200) == estimate_cost(60, usd_cents_per_hour=200)
 
 
 async def test_a_non_json_200_is_malformed_not_a_crash() -> None:
@@ -254,4 +300,4 @@ async def test_a_non_json_200_is_malformed_not_a_crash() -> None:
 
 def test_scoring_without_a_key_refuses_to_be_built() -> None:
     with pytest.raises(ProviderConfigurationError, match="AZURE_SPEECH_KEY"):
-        AzureScorer(key=KEY, region="", timeout_seconds=1)
+        AzureScorer(key=KEY, region="", timeout_seconds=1, usd_cents_per_hour=200)

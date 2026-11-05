@@ -187,8 +187,10 @@ def test_an_empty_group_is_total_overlap_not_a_crash() -> None:
 # ------------------------------------------------------------------- the tone mode
 
 
-def test_phonemes_with_tone_digits_mean_parse() -> None:
-    assert tone_mode_of([scored(GOOD, 90.0, phonemes=("ni3", "hao3"))]) == "parse"
+def test_tone_digits_do_not_mean_parse() -> None:
+    """D-140: Azure's digit is the tone it expected (wo 3 for a sandhied wó),
+    so a phoneme string with digits is still a case for deriving."""
+    assert tone_mode_of([scored(GOOD, 90.0, phonemes=("ni 3", "hao 3"))]) == "derive"
 
 
 def test_phonemes_without_tone_digits_mean_derive() -> None:
@@ -274,7 +276,8 @@ def test_the_report_states_what_each_number_was_judged_against() -> None:
 def test_the_report_says_which_tone_mode_to_set() -> None:
     text = as_markdown(report([88], [20], phonemes=("ni3",)), provider="azure")
 
-    assert "`parse`" in text
+    assert "`derive`" in text
+    assert "D-140" in text
 
 
 def test_the_report_says_what_it_has_not_settled() -> None:
@@ -296,7 +299,7 @@ def test_the_json_carries_the_same_verdict() -> None:
     r = report([88, 90], [20, 25], phonemes=("ni3",))
 
     assert as_json(r, provider="azure")["passed"] is r.passed
-    assert as_json(r, provider="azure")["tone_mode"] == "parse"
+    assert as_json(r, provider="azure")["tone_mode"] == "derive"
 
 
 # ------------------------------------------------------------------- the CLI

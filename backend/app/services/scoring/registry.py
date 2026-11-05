@@ -18,13 +18,17 @@ from collections.abc import Callable
 
 from app.core.config import Settings
 from app.services.provider_errors import ProviderConfigurationError
+from app.services.scoring.azure import AzureScorer
 from app.services.scoring.base import Language, PronunciationScorer
 from app.services.scoring.fake import FakeScorer
 
 #: Every implementation that exists. Adding a vendor means one entry here and
 #: one new module — that is the whole change surface M0 is meant to have.
-_FACTORIES: dict[str, Callable[[], PronunciationScorer]] = {
-    "fake": FakeScorer,
+#: Each factory takes the settings: a real vendor needs its key, region and
+#: price, as llm/registry.py's and tts/registry.py's do.
+_FACTORIES: dict[str, Callable[[Settings], PronunciationScorer]] = {
+    "fake": lambda _settings: FakeScorer(),
+    "azure": AzureScorer.from_settings,
 }
 
 
@@ -33,7 +37,7 @@ def available_providers() -> tuple[str, ...]:
     return tuple(sorted(_FACTORIES))
 
 
-def build_scorer(name: str) -> PronunciationScorer:
+def build_scorer(name: str, *, settings: Settings) -> PronunciationScorer:
     """Instantiate one provider by name.
 
     Raises:
@@ -46,7 +50,7 @@ def build_scorer(name: str) -> PronunciationScorer:
         raise ProviderConfigurationError(
             f"unknown scoring provider {name!r}; implemented: {list(available_providers())}"
         )
-    return factory()
+    return factory(settings)
 
 
 def provider_chain(settings: Settings) -> tuple[str, ...]:
@@ -68,7 +72,7 @@ def get_scorer(language: Language, *, settings: Settings) -> PronunciationScorer
     """
     chain = provider_chain(settings)
     for name in chain:
-        scorer = build_scorer(name)
+        scorer = build_scorer(name, settings=settings)
         if scorer.supports(language):
             return scorer
 

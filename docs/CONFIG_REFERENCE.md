@@ -44,7 +44,7 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `SCORING_PROVIDER` | `fake` | `fake` / `azure` / `iflytek` |
+| `SCORING_PROVIDER` | `fake` | `fake` / `azure` |
 | `SCORING_FALLBACK_PROVIDERS` | `` | 逗号分隔，按序回退 |
 | `TTS_PROVIDER` | `fake` | `fake` / `azure`。Google 与 ElevenLabs 没有高棉语 TTS，不实现（D-125） |
 | `LLM_PROVIDER` | `fake` | `fake` / `openai` |
@@ -71,6 +71,7 @@
 | `SCORING_MAX_RETRY` | `3` | 单条最多重试次数 |
 | `DRILL_MASKED_ROUNDS` | `2` | `[$]` 跟读通过后再遮词练几轮（PRD 3.1「跟读→逐步遮词」）：第一轮遮一半，最后一轮全遮。**每轮每课多约 8 次录音**，计入额度与成本。0 为关闭（D-135，项目所有者定为 2） |
 | `SCORING_TIMEOUT_MS` | `8000` | 超时即降级，不扣额度 |
+| `SCORING_PRICE_USD_CENTS_PER_HOUR` | `200` | `[$]` 评测每小时音频的估算成本（美分），只用于记账与成本护栏。标价约 $1/小时，附加费未确认，先按 $2 上限；拿到账单后改这里 |
 | `MASTERY_DELTA_BASE` | `40.0` | `delta = (score - pass_threshold) / base` |
 | `MASTERY_WEIGHT_DRILL` | `0.6` | |
 | `MASTERY_WEIGHT_VOCAB` | `0.8` | |
@@ -80,7 +81,7 @@
 | `SM2_EASE_INITIAL` | `2.5` | |
 | `SM2_EASE_MIN` | `1.3` | |
 | `SM2_EASE_PENALTY` | `0.2` | |
-| `ZH_TONE_MODE` | `auto` | `[M0]` `parse`（音素带声调数字）/ `derive` / `auto` |
+| `ZH_TONE_MODE` | `derive` | `[M0]` 声调分怎么算。M0-1 首次实测发现 Azure 音素里的声调数字是它**预期**的声调，不是听到的，所以从音节准确度推导；`parse` 启动即拒绝，`auto` 等同 `derive`（D-140） |
 
 ## 4. 额度与限制
 

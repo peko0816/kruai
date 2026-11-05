@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from app.core.config import Settings
+from app.services.provider_errors import ProviderConfigurationError
 from app.services.scoring import get_scorer
 from app.services.scoring import registry as scoring_registry
 from app.services.scoring.base import (
@@ -78,7 +79,7 @@ class ZhOnlyScorer(PronunciationScorer):
 @pytest.fixture
 def zh_only_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     """Register a partial-coverage provider for the duration of one test."""
-    monkeypatch.setitem(scoring_registry._FACTORIES, "zh-only", ZhOnlyScorer)
+    monkeypatch.setitem(scoring_registry._FACTORIES, "zh-only", lambda _s: ZhOnlyScorer())
 
 
 # ------------------------------------------------------------- default wiring
@@ -100,15 +101,15 @@ def test_fake_is_registered() -> None:
 
 
 def test_build_scorer_reports_its_ledger_name() -> None:
-    assert build_scorer("fake").name == "fake"
+    assert build_scorer("fake", settings=settings()).name == "fake"
 
 
 # --------------------------------------------------------------- misconfigured
 
 
 def test_unknown_provider_names_the_typo_and_the_alternatives() -> None:
-    with pytest.raises(ValueError, match="unknown scoring provider 'azure'"):
-        get_scorer(Language.ZH_CN, settings=settings(SCORING_PROVIDER="azure"))
+    with pytest.raises(ValueError, match="unknown scoring provider 'iflytek'"):
+        get_scorer(Language.ZH_CN, settings=settings(SCORING_PROVIDER="iflytek"))
 
 
 def test_unknown_fallback_is_caught_too() -> None:
@@ -118,12 +119,12 @@ def test_unknown_fallback_is_caught_too() -> None:
     assert get_scorer(Language.ZH_CN, settings=configured) is not None
     # ...but building it directly still fails loudly, which is what B5 will sweep.
     with pytest.raises(ValueError, match="unknown scoring provider 'typo'"):
-        build_scorer("typo")
+        build_scorer("typo", settings=configured)
 
 
 def test_error_message_lists_what_is_implemented() -> None:
-    with pytest.raises(ValueError, match=r"implemented: \['fake'\]"):
-        build_scorer("nope")
+    with pytest.raises(ValueError, match=r"implemented: \['azure', 'fake'\]"):
+        build_scorer("nope", settings=settings())
 
 
 # ------------------------------------------------------------- fallback chain
@@ -154,3 +155,65 @@ def test_language_nobody_supports_names_the_language() -> None:
 
     with pytest.raises(ValueError, match="no configured scoring provider supports en-US"):
         get_scorer(Language.EN_US, settings=configured)
+
+
+# ------------------------------------------------------------------- azure (E9)
+
+
+def test_azure_is_registered_and_reads_its_settings() -> None:
+    from app.services.scoring.azure import AzureScorer
+
+    configured = settings(
+        SCORING_PROVIDER="azure", AZURE_SPEECH_KEY="k", AZURE_SPEECH_REGION="eastasia"
+    )
+
+    assert isinstance(get_scorer(Language.ZH_CN, settings=configured), AzureScorer)
+
+
+async def test_azure_bills_at_the_configured_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owner sets cost caps from pricing, so the estimate is configuration too."""
+    import io
+    import wave
+
+    from app.services.azure_speech import Outcome
+
+    async def timed_out(*_: Any, **__: Any) -> Outcome:
+        return Outcome(error="timeout", message="")  # billed: the audio was sent
+
+    monkeypatch.setattr("app.services.scoring.azure.post", timed_out)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16_000)
+        writer.writeframes(bytes(36 * 16_000 * 2))
+    configured = settings(
+        SCORING_PROVIDER="azure",
+        AZURE_SPEECH_KEY="k",
+        AZURE_SPEECH_REGION="eastasia",
+        SCORING_PRICE_USD_CENTS_PER_HOUR="100",
+    )
+
+    result = await get_scorer(Language.ZH_CN, settings=configured).assess(
+        buffer.getvalue(), language=Language.ZH_CN, mode=AssessMode.SCRIPTED, reference_text="x"
+    )
+
+    assert result.cost_usd_millicents == 1000, "36 s at $1 an hour is one cent"
+
+
+def test_azure_without_a_key_is_a_configuration_error() -> None:
+    """So the startup self-check refuses to boot rather than the first learner failing."""
+    with pytest.raises(ProviderConfigurationError, match="AZURE_SPEECH_KEY"):
+        get_scorer(Language.ZH_CN, settings=settings(SCORING_PROVIDER="azure"))
+
+
+def test_azure_with_parse_tone_mode_is_a_configuration_error() -> None:
+    configured = settings(
+        SCORING_PROVIDER="azure",
+        AZURE_SPEECH_KEY="k",
+        AZURE_SPEECH_REGION="eastasia",
+        ZH_TONE_MODE="parse",
+    )
+
+    with pytest.raises(ProviderConfigurationError, match="D-140"):
+        get_scorer(Language.ZH_CN, settings=configured)

@@ -444,6 +444,43 @@ async def test_an_open_answer_has_no_reference_to_mark(
     assert body["reference_text"] is None
 
 
+@pytest.mark.parametrize(
+    ("audio", "expected"),
+    [
+        (SHORT_AUDIO, "wav"),
+        (b"OggS" + bytes(200), "ogg"),
+        (b"ID3" + bytes(200), "unknown"),
+        (b"RIFF" + bytes(4) + b"AVI " + bytes(200), "unknown"),
+    ],
+    ids=["wav", "telegram-ogg", "other", "riff-not-wave"],
+)
+async def test_the_scorer_is_told_what_the_recording_is(
+    seeded: dict[str, uuid.UUID],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    audio: bytes,
+    expected: str,
+) -> None:
+    """D-141: from the recording's own bytes. Before this every Telegram voice
+    note reached the scorer labelled wav, which a real provider refuses."""
+    from app.services.scoring import registry as scoring_registry
+    from app.services.scoring.fake import FakeScorer
+
+    seen: list[str] = []
+
+    class Spy(FakeScorer):
+        async def assess(self, audio: bytes, **kwargs: Any) -> Any:
+            seen.append(kwargs["audio_format"])
+            return await super().assess(audio, **kwargs)
+
+    monkeypatch.setitem(scoring_registry._FACTORIES, "spy", lambda _s: Spy())
+    async with client_for(settings.model_copy(update={"scoring_provider": "spy"})) as client:
+        headers = await authenticated(client)
+        await attempt(client, seeded["drill"], headers=headers, audio=audio)
+
+    assert seen == [expected]
+
+
 async def test_an_item_without_a_concept_scores_but_advances_nothing(
     client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
 ) -> None:

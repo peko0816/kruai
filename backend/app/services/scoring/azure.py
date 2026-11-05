@@ -1,4 +1,6 @@
-"""Azure pronunciation assessment behind the normative ``PronunciationScorer``, for M0-1.
+"""Azure pronunciation assessment behind the normative ``PronunciationScorer`` (BACKLOG E9).
+
+Moved from m0/ ahead of M0-1's verdict, with the owner's approval (D-141).
 
 Uses the short-audio REST endpoint with a ``Pronunciation-Assessment`` header.
 Two things about it shape this module:
@@ -7,14 +9,18 @@ Two things about it shape this module:
   recordings are usually 44.1 or 48 kHz, so the common failure is a format
   refusal, and it is caught here — before the request, where it costs nothing
   — with the ffmpeg line that fixes it.
-* **The response has not been seen yet.** Microsoft's REST examples put the
-  scores directly on each node; the SDK nests them under
-  ``PronunciationAssessment``. Both shapes are read, and anything else comes
-  back as ``scoring.malformed_response`` with the body kept in ``raw``, so
-  the first real run says what it got instead of a KeyError.
+* **The response shape.** The REST endpoint puts the scores directly on each
+  node (seen on 2026-11-05); the SDK nests them under ``PronunciationAssessment``.
+  Both shapes are read, and anything else comes back as
+  ``scoring.malformed_response`` with the body kept in ``raw``.
 
-``tone_score`` is always None: whether tone can be parsed from the phonemes
-or must be derived is exactly what M0-1 is run to find out (ZH_TONE_MODE).
+Scripted when there is a reference sentence; unscripted otherwise, which
+Azure answers by recognising what was said and assessing that (tried for real
+on 2026-11-05). Unscripted reports no completeness: there was nothing to be
+complete against (scoring/base.py).
+
+Mandarin tone comes from ``scoring/zh_tone.py``, derived from syllable accuracy
+(D-140).
 """
 
 from __future__ import annotations
@@ -41,17 +47,12 @@ from app.services.scoring.base import (
     PronunciationScorer,
     WordScore,
 )
+from app.services.scoring.zh_tone import ToneMode, check_tone_mode, tone_score
 
 _SAMPLE_RATE: Final = 16_000
 _MAX_SECONDS: Final = 60.0
 _FFMPEG_HINT: Final = "convert with: ffmpeg -i IN -ar 16000 -ac 1 -sample_fmt s16 OUT.wav"
 
-#: Speech-to-text is listed at $1 an hour and assessment is billed on top of
-#: it; the add-on's US price could not be confirmed (Azure China lists it per
-#: hour per feature). $2 an hour is the upper bound assumed until a bill says
-#: otherwise, and each call is rounded up — base.py asks for a conservative
-#: overestimate when the real figure is unknown. The free tier bills nothing.
-_USD_CENTS_PER_HOUR: Final = 200
 _MILLICENTS_PER_CENT: Final = 1000
 
 #: Azure reports offsets and durations in 100-nanosecond ticks.
@@ -63,7 +64,7 @@ _NO_SPEECH: Final = frozenset({"NoMatch", "InitialSilenceTimeout", "BabbleTimeou
 
 
 class AzureScorer(PronunciationScorer):
-    """Scripted assessment through Azure's REST endpoint. Never raises from assess."""
+    """Assessment through Azure's REST endpoint. Never raises from assess."""
 
     name = "azure"
 
@@ -73,18 +74,23 @@ class AzureScorer(PronunciationScorer):
         key: str,
         region: str,
         timeout_seconds: float,
+        usd_cents_per_hour: int,
+        tone_mode: ToneMode = "derive",
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         """
         Raises:
-            ProviderConfigurationError: no key or no region — raised before
-                the first recording is sent, not once per recording.
+            ProviderConfigurationError: no key or no region, or a tone mode
+                that cannot work — raised before the first recording is sent,
+                so the startup self-check refuses to boot.
         """
         if not key or not region:
             raise ProviderConfigurationError(
                 "azure scoring needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION in .env"
             )
+        check_tone_mode(tone_mode)
+        self._usd_cents_per_hour = usd_cents_per_hour
         self._key = key
         self._url = (
             f"https://{region}.stt.speech.microsoft.com"
@@ -100,6 +106,8 @@ class AzureScorer(PronunciationScorer):
             key=settings.azure_speech_key.get_secret_value(),
             region=settings.azure_speech_region,
             timeout_seconds=settings.scoring_timeout_ms / 1000,
+            usd_cents_per_hour=settings.scoring_price_usd_cents_per_hour,
+            tone_mode=settings.zh_tone_mode,
         )
 
     def supports(self, language: Language) -> bool:
@@ -114,19 +122,19 @@ class AzureScorer(PronunciationScorer):
         reference_text: str | None = None,
         audio_format: str = "wav",
     ) -> PronunciationResult:
-        # M0-1 is scripted throughout. Unscripted assessment on this endpoint
-        # is unverified, and a verification adapter guessing at it would
-        # produce numbers nobody asked for.
-        if mode is not AssessMode.SCRIPTED:
-            return _failure("scoring.unsupported_mode", "the m0 adapter assesses scripted only")
-        if not reference_text:
+        scripted = mode is AssessMode.SCRIPTED
+        if scripted and not reference_text:
             return _failure("scoring.missing_reference", "scripted assessment needs reference_text")
+        if not scripted and reference_text is not None:
+            # base.py: UNSCRIPTED takes no reference. Honouring one would be a
+            # scripted assessment the caller did not ask for.
+            return _failure("scoring.reference_not_allowed", "unscripted takes no reference_text")
 
         prepared = inspect_audio(audio, audio_format)
         if isinstance(prepared, PronunciationResult):
             return prepared
         content_type, seconds = prepared
-        cost = estimate_cost(seconds)
+        cost = estimate_cost(seconds, usd_cents_per_hour=self._usd_cents_per_hour)
 
         outcome = await post(
             f"{self._url}?language={language.value}&format=detailed",
@@ -134,7 +142,7 @@ class AzureScorer(PronunciationScorer):
                 "Ocp-Apim-Subscription-Key": self._key,
                 "Content-Type": content_type,
                 "Accept": "application/json",
-                "Pronunciation-Assessment": assessment_header(reference_text, language),
+                "Pronunciation-Assessment": assessment_header(reference_text or "", language),
             },
             content=audio,
             timeout_seconds=self._timeout_seconds,
@@ -149,17 +157,21 @@ class AzureScorer(PronunciationScorer):
             body = outcome.response.json()
         except ValueError:
             return _failure("scoring.malformed_response", "response was not JSON", cost=cost)
-        return parse(body, language=language, cost=cost)
+        return parse(body, language=language, cost=cost, scripted=scripted)
 
 
 def assessment_header(reference_text: str, language: Language) -> str:
-    """Base64 JSON, as the endpoint requires. Prosody exists for en-US only."""
+    """Base64 JSON, as the endpoint requires. Prosody exists for en-US only.
+
+    An empty reference asks for an unscripted assessment; miscue detection
+    (omissions, insertions) only means something against a reference.
+    """
     params: dict[str, Any] = {
         "ReferenceText": reference_text,
         "GradingSystem": "HundredMark",
         "Granularity": "Phoneme",
         "Dimension": "Comprehensive",
-        "EnableMiscue": True,
+        "EnableMiscue": bool(reference_text),
     }
     if language is Language.EN_US:
         params["EnableProsodyAssessment"] = True
@@ -199,17 +211,19 @@ def inspect_audio(
     return f"audio/wav; codecs=audio/pcm; samplerate={_SAMPLE_RATE}", seconds
 
 
-def estimate_cost(seconds: float | None) -> int:
+def estimate_cost(seconds: float | None, *, usd_cents_per_hour: int) -> int:
     """Thousandths of a US cent, rounded up (D-136). Unknown length is billed as the maximum.
 
-    A four-second recording is about 0.2 cents: reported in whole cents it
-    would round to one, and a month of them would look five times dearer.
+    The rate is SCORING_PRICE_USD_CENTS_PER_HOUR: the owner sets cost caps from
+    pricing, so the estimate they are compared against is configuration too.
     """
     length = _MAX_SECONDS if seconds is None else seconds
-    return math.ceil(length * _USD_CENTS_PER_HOUR * _MILLICENTS_PER_CENT / 3600)
+    return math.ceil(length * usd_cents_per_hour * _MILLICENTS_PER_CENT / 3600)
 
 
-def parse(body: Mapping[str, Any], *, language: Language, cost: int) -> PronunciationResult:
+def parse(
+    body: Mapping[str, Any], *, language: Language, cost: int, scripted: bool = True
+) -> PronunciationResult:
     """Turn a detailed-format response into the interface's result."""
     raw = dict(body)
     status = body.get("RecognitionStatus")
@@ -234,9 +248,11 @@ def parse(body: Mapping[str, Any], *, language: Language, cost: int) -> Pronunci
             pron_score=pron,
             accuracy_score=_score(scores, "AccuracyScore"),
             fluency_score=_score(scores, "FluencyScore"),
-            completeness_score=_score(scores, "CompletenessScore"),
+            # Azure reports completeness unscripted too, against what it heard;
+            # base.py reserves it for scripted, where it means something.
+            completeness_score=_score(scores, "CompletenessScore") if scripted else None,
             prosody_score=_score(scores, "ProsodyScore") if language is Language.EN_US else None,
-            tone_score=None,
+            tone_score=tone_score(words) if language is Language.ZH_CN else None,
             words=words,
             raw=raw,
             cost_usd_millicents=cost,

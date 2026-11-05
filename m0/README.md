@@ -69,9 +69,10 @@ SCORING_PROVIDER=azure make m0-scoring \
 
 输出 `docs/m0-1-scoring.md`，并给出 `ZH_TONE_MODE` 的结论：
 
-- **`parse`** —— provider 的音素串自带声调数字（`ni3`），E9 直接读
-- **`derive`** —— 不带，E9 要从音素级准确率推导
+- **`derive`** —— 有音素级数据，声调分从音节准确率推导
 - **`unknown`** —— 根本没返回音素，这本身就是结论
+
+不再有 `parse`：Azure 音素里的声调数字（`ni 3`）是它按参考文本查到的应读声调，不是听到的（D-140）。
 
 退出码 0 表示四条判据全过。
 
@@ -186,18 +187,17 @@ E8 读那张表；表没填，`TTS_PROVIDER` 就没有东西可以解析逻辑�
 
 ---
 
-# Azure 验证实现（`m0/azure/`）
+# Azure 实现（已全部在 `app/services/`）
 
-**TTS 已搬进 `app/services/tts/azure.py`**（E8 提前，D-137），盲评脚本直接用应用的注册表；
-HTTP 层也搬到了 `app/services/azure_speech.py`。**评分仍在 `m0/azure/`**（D-126），等 E9 再搬。
+**TTS 在 `app/services/tts/azure.py`**（E8，D-137），**评分在 `app/services/scoring/azure.py`**（E9，D-141），
+HTTP 层在 `app/services/azure_speech.py`。M0 脚本都经应用的注册表取用，`m0/azure/` 已删除。
 
 | | |
 |---|---|
 | 资源 | `ai-tutor-speech`，区域 `eastasia`，免费档 F0 |
 | 走的接口 | REST（不是 Speech SDK）：TTS 用 `cognitiveservices/v1` + SSML；评测用短音频识别端点 + `Pronunciation-Assessment` 头 |
 | 限流 | F0 每分钟约 20 次。遇到 429 按 `Retry-After` 等，最多试 3 次 |
-| 成本 | F0 实际不收费；记账按标价估：TTS $15／百万字符（逐条向下取整）、评测按 $2／小时上限，记到千分之一美分（D-136） |
-| **没验证过的** | 评测返回的 JSON 结构只对着微软文档写过，两种文档写法都能读；读不懂时报 `scoring.malformed_response` 并把原文留在 `raw`。**第一次真实调用要有人盯着** |
-
-E9 搬走评分之后，这个目录随之删除。
+| 成本 | F0 实际不收费；记账按标价估：TTS $15／百万字符（逐条向下取整）、评测按 `SCORING_PRICE_USD_CENTS_PER_HOUR`（默认 $2／小时），记到千分之一美分（D-136） |
+| 已验证（2026-11-05） | 评测返回扁平结构（分数直接在各节点上）；开放问答（空参考文本）可评 |
+| **没验证过的** | Telegram 的 OGG/Opus 录音。部署后第一项冒烟测试：发一条真实语音（D-141） |
 

@@ -21,7 +21,7 @@ Three questions, and the acceptance for each comes from REAL_ENVIRONMENT:
 
 The script never names a vendor. It asks `m0.providers` for whatever
 `SCORING_PROVIDER` says — the application registry for `fake`, the
-verification adapter in `m0.azure` for `azure` (D-126) — so running it
+Azure adapter in `app/services/scoring/azure.py` for `azure` (D-141) — so running it
 against FakeScorer exercises every line of it without a key or a bill, which
 is how it was written and how its tests run. A billed run writes every call
 to `cost_ledger` and will not start if it cannot.
@@ -67,10 +67,6 @@ GROUPS: Final[tuple[str, ...]] = (GOOD, BAD)
 #: can state what it was judged against instead of printing bare numbers.
 MIN_MEAN_GAP: Final = 15.0
 MAX_OVERLAP: Final = 0.20
-
-#: A phoneme string that carries its tone, e.g. ni3 hao3. Azure's zh-CN
-#: output may or may not; which one decides how E9 computes tone_score.
-_TONE_DIGITS: Final = frozenset("12345")
 
 
 @dataclass(frozen=True)
@@ -203,19 +199,18 @@ def overlap(good: Sequence[float], bad: Sequence[float]) -> float:
 
 
 def tone_mode_of(scored: Sequence[Scored]) -> str:
-    """What `ZH_TONE_MODE` should be set to, read off the phoneme strings.
+    """What `ZH_TONE_MODE` should be set to: ``derive``, or ``unknown`` without phonemes.
 
-    ``parse`` when the provider writes tone into the phoneme itself (ni3), so
-    E9 reads it. ``derive`` when it does not, and tone has to be computed from
-    phoneme-level accuracy instead. ``unknown`` when no phonemes came back at
-    all, which is itself a finding: without them E9 cannot do either.
+    This used to answer ``parse`` whenever the phonemes carried tone digits
+    (``ni 3``), and the first real run did answer ``parse``. That was the wrong
+    question: the digit is the tone the provider *expected* for the reference
+    text — dictionary tones, sandhi ignored, the occasional wrong reading
+    (几 → ``ji 1``) — so its presence says nothing about the tone heard (D-140).
+    Tone is derived from syllable accuracy whenever there are syllables;
+    ``unknown`` when no phonemes came back at all, which is itself a finding.
     """
     phonemes = [p.phoneme for s in scored for w in s.result.words for p in w.phonemes]
-    if not phonemes:
-        return "unknown"
-    if any(set(p) & _TONE_DIGITS for p in phonemes):
-        return "parse"
-    return "derive"
+    return "derive" if phonemes else "unknown"
 
 
 @dataclass(frozen=True)
@@ -330,10 +325,9 @@ def as_markdown(report: Report, *, provider: str) -> str:
         f"Set it to `{report.tone_mode}`.",
         "",
         {
-            "parse": "The provider writes tone into the phoneme strings, so E9 reads "
-            "it rather than computing it.",
-            "derive": "The phoneme strings carry no tone, so E9 has to derive "
-            "`tone_score` from phoneme-level accuracy.",
+            "derive": "Tone is derived from syllable accuracy. Any tone digits in the "
+            "phoneme strings are the tones the provider expected, not the ones it "
+            "heard, so they cannot be read as the learner's (D-140).",
             "unknown": "No phonemes came back at all. E9 can do neither until that "
             "is resolved — check the request asks for phoneme-level detail.",
         }[report.tone_mode],

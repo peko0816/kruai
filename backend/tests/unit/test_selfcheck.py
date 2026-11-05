@@ -105,7 +105,7 @@ def broken_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.scoring import registry as scoring_registry
     from app.services.tts import registry as tts_registry
 
-    monkeypatch.setitem(scoring_registry._FACTORIES, "en-only", EnglishOnlyScorer)
+    monkeypatch.setitem(scoring_registry._FACTORIES, "en-only", lambda _s: EnglishOnlyScorer())
     monkeypatch.setitem(tts_registry._FACTORIES, "no-khmer", lambda _s, _v: NoKhmerTTS())
 
 
@@ -270,7 +270,7 @@ def test_a_genuine_bug_in_a_factory_is_not_reported_as_misconfiguration(
     """Catching ValueError broadly would send someone to the wrong file."""
     from app.services.scoring import registry as scoring_registry
 
-    def exploding() -> PronunciationScorer:
+    def exploding(_settings: object) -> PronunciationScorer:
         raise RuntimeError("a real bug inside the factory")
 
     monkeypatch.setitem(scoring_registry._FACTORIES, "fake", exploding)
