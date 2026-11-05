@@ -16,6 +16,7 @@ with each other end to end.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -32,6 +33,7 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 
 from app.core.config import Settings
+from app.core.payloads import explain_payload, qa_payload, spoken_payload
 from app.main import create_app
 from tests.integration.conftest import Execute, Rows
 from tests.unit.test_security import BOT_TOKEN
@@ -86,7 +88,9 @@ def unit(db: sa.Engine) -> dict[str, uuid.UUID]:
                     "lesson": ids["lesson"],
                     "concept": ids["concept"],
                     "type": "explain",
-                    "payload": '{"text": "我要 + noun"}',
+                    "payload": json.dumps(
+                        explain_payload(pattern="我要 + noun", km_explanation="ការពន្យល់")
+                    ),
                     "seq": 1,
                 },
                 {
@@ -94,7 +98,9 @@ def unit(db: sa.Engine) -> dict[str, uuid.UUID]:
                     "lesson": ids["lesson"],
                     "concept": ids["concept"],
                     "type": "drill",
-                    "payload": '{"target_text": "我要水"}',
+                    "payload": json.dumps(
+                        spoken_payload(target_text="我要水", pinyin="wǒ yào shuǐ", km_gloss="ទឹក")
+                    ),
                     "seq": 2,
                 },
                 {
@@ -102,7 +108,9 @@ def unit(db: sa.Engine) -> dict[str, uuid.UUID]:
                     "lesson": ids["lesson"],
                     "concept": ids["concept"],
                     "type": "vocab",
-                    "payload": '{"target_text": "我要茶"}',
+                    "payload": json.dumps(
+                        spoken_payload(target_text="我要茶", pinyin="wǒ yào chá", km_gloss="តែ")
+                    ),
                     "seq": 3,
                 },
                 {
@@ -110,7 +118,14 @@ def unit(db: sa.Engine) -> dict[str, uuid.UUID]:
                     "lesson": ids["lesson"],
                     "concept": ids["concept"],
                     "type": "qa",
-                    "payload": '{"prompt": "你要什么?"}',
+                    "payload": json.dumps(
+                        qa_payload(
+                            hskk_task_type="listen_and_answer",
+                            prompt_zh="你要什么?",
+                            prompt_km="តើអ្នកចង់បានអ្វី?",
+                            sample_answer_zh="我要水",
+                        )
+                    ),
                     "seq": 4,
                 },
             ],

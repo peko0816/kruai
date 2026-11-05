@@ -24,12 +24,14 @@ import hashlib
 import hmac
 import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 from urllib.parse import urlencode
 
 import httpx
 
+from app.core import payloads
 from bot.flow import Lesson, Step
 
 #: Telegram's derivation constant. Fixed by their protocol (see
@@ -222,24 +224,40 @@ def _unwrap(response: httpx.Response) -> Any:
 
 
 def _step_from(item: dict[str, Any]) -> Step:
-    """One lesson item as the conversation needs it.
-
-    ``text`` comes out of the pack's payload, which is content rather than
-    schema — an item with nothing sayable in it still has to render, so the
-    known keys are tried in order and an empty string is better than a
-    traceback in front of a learner.
-    """
+    """One lesson item as the conversation needs it."""
     payload = item.get("payload") or {}
     media = item.get("media") or {}
-    text = payload.get("target_text") or payload.get("text") or payload.get("prompt") or ""
     return Step(
         item_id=uuid.UUID(item["id"]),
         item_type=item["item_type"],
-        text=str(text),
+        text=text_of(item["item_type"], payload),
         audio_url=media.get("primary_url"),
         video_url=media.get("video_url"),
         disclaimer_key=media.get("disclaimer_key"),
     )
 
 
-__all__ = ["ApiError", "KruaiApi", "sign_init_data"]
+#: What a learner reads for each kind of step, as payload keys in display order.
+#: The keys are the importer's (app.core.payloads); this used to guess at
+#: ``target_text`` / ``text`` / ``prompt``, and against imported content every
+#: guess missed, so every step rendered blank (D-130).
+_SHOWN: Final[dict[str, tuple[str, ...]]] = {
+    "explain": (payloads.PATTERN, payloads.KM_EXPLANATION),
+    "drill": (payloads.TARGET_TEXT, payloads.PINYIN, payloads.KM_GLOSS),
+    "vocab": (payloads.TARGET_TEXT, payloads.PINYIN, payloads.KM_GLOSS),
+    "qa": (payloads.PROMPT_ZH, payloads.PROMPT_KM),
+}
+
+
+def text_of(item_type: str, payload: Mapping[str, Any]) -> str:
+    """The lines of a step, one per non-empty field.
+
+    An item with nothing showable still renders as an empty string rather than
+    a traceback in front of a learner; that a real item never does is what the
+    pipeline-to-bot test is for.
+    """
+    lines = (payload.get(key) for key in _SHOWN.get(item_type, ()))
+    return "\n".join(line.strip() for line in lines if isinstance(line, str) and line.strip())
+
+
+__all__ = ["ApiError", "KruaiApi", "sign_init_data", "text_of"]
