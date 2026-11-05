@@ -52,3 +52,4 @@ m0/tts-blind.zip
 
 # M0-1 recordings of real people. Personal data: never committed.
 m0/recordings/
+locales/*.confirm.csv

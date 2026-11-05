@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     #: supplies it); it becomes a real per-concept estimate by changing this
     #: call site, not that module.
     review_estimated_seconds_per_concept: int = Field(default=60, gt=0)
+    #: Spoken items served with each due concept: the ones this learner
+    #: practised longest ago come first, so a review rotates through the
+    #: concept's sentences instead of repeating its first three (D-133).
+    review_items_per_concept: int = Field(default=3, gt=0)
     #: [$] Ceiling on one uploaded recording. A Telegram voice note of the
     #: length a drill asks for is tens of kilobytes; this is generous for that
     #: and still refuses the upload that would be read into memory and then

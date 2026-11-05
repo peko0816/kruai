@@ -184,6 +184,11 @@ class KruaiApi:
         )
         return body
 
+    async def review_steps(self, token: str) -> tuple[Step, ...]:
+        """What is due, as steps: the server already chose the items (D-133)."""
+        body = await self._get("/api/v1/review/queue", token=token)
+        return tuple(_step_from(item) for entry in body["entries"] for item in entry["items"])
+
     async def entitlements(self, token: str) -> dict[str, Any]:
         body: dict[str, Any] = await self._get("/api/v1/me/entitlements", token=token)
         return body

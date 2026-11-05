@@ -23,7 +23,7 @@ from typing import Final
 
 from redis.asyncio import Redis
 
-from bot.flow import Session
+from bot.flow import Session, Step
 
 #: One namespace so a shared Redis stays legible, and so a flush of bot state
 #: cannot take RQ's queues with it.
@@ -61,6 +61,8 @@ class SessionStore:
                 lesson_id=uuid.UUID(stored["lesson_id"]),
                 step_index=int(stored["step_index"]),
                 attempts_used=int(stored["attempts_used"]),
+                # Absent in sessions stored before reviews existed (D-133).
+                review_steps=tuple(_step_from(s) for s in stored.get("review_steps", ())),
             )
         except (ValueError, TypeError, KeyError):
             await self.clear(telegram_id)
@@ -80,6 +82,7 @@ class SessionStore:
                     "lesson_id": str(session.lesson_id),
                     "step_index": session.step_index,
                     "attempts_used": session.attempts_used,
+                    "review_steps": [_step_to(step) for step in session.review_steps],
                 }
             ),
             ex=self._ttl,
@@ -87,6 +90,39 @@ class SessionStore:
 
     async def clear(self, telegram_id: int) -> None:
         await self._redis.delete(key_for(telegram_id))
+
+
+def _step_to(step: Step) -> dict[str, object]:
+    return {
+        "item_id": str(step.item_id),
+        "item_type": step.item_type,
+        "text": step.text,
+        "audio_url": step.audio_url,
+        "video_url": step.video_url,
+        "disclaimer_key": step.disclaimer_key,
+        "answer_text": step.answer_text,
+        "answer_audio_url": step.answer_audio_url,
+    }
+
+
+def _step_from(stored: dict[str, object]) -> Step:
+    """Raises KeyError, ValueError or TypeError on a malformed step, which
+    load() treats like any other unreadable session."""
+
+    def optional(key: str) -> str | None:
+        value = stored.get(key)
+        return None if value is None else str(value)
+
+    return Step(
+        item_id=uuid.UUID(str(stored["item_id"])),
+        item_type=str(stored["item_type"]),
+        text=str(stored["text"]),
+        audio_url=optional("audio_url"),
+        video_url=optional("video_url"),
+        disclaimer_key=optional("disclaimer_key"),
+        answer_text=str(stored.get("answer_text") or ""),
+        answer_audio_url=optional("answer_audio_url"),
+    )
 
 
 __all__ = ["KEY_PREFIX", "SessionStore", "key_for"]

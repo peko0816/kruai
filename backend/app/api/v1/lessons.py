@@ -133,7 +133,7 @@ async def get_lesson(
     """
     lesson = await _load_lesson(session, lesson_id)
     await _require_started(session, user_id=user_id, lesson_id=lesson_id)
-    viewer = await _load_viewer(
+    viewer = await load_viewer(
         session, session_factory=session_factory, settings=settings, user_id=user_id
     )
     items = await _load_items(session, lesson_id)
@@ -159,7 +159,7 @@ async def get_lesson(
         sequence=lesson.sequence,
         title_km=lesson.title_km,
         concept_ids=list(lesson.concept_ids),
-        items=[_item_out(item, media) for item, media in resolved],
+        items=[item_out(item, media) for item, media in resolved],
     )
 
 
@@ -181,7 +181,7 @@ async def _load_lesson(session: AsyncSession, lesson_id: uuid.UUID) -> Lesson:
     return lesson
 
 
-async def _load_viewer(
+async def load_viewer(
     session: AsyncSession,
     *,
     session_factory: async_sessionmaker[AsyncSession],
@@ -249,7 +249,7 @@ async def _load_items(
     ]
 
 
-def _item_out(item: LessonItem, media: ResolvedMedia) -> LessonItemOut:
+def item_out(item: LessonItem, media: ResolvedMedia) -> LessonItemOut:
     return LessonItemOut(
         id=item.id,
         sequence=item.sequence,
