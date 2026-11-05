@@ -68,7 +68,7 @@ async def get_entitlements(
     idempotent, so calling it on a read costs one statement and cannot double.
     """
     now = datetime.datetime.now(datetime.UTC)
-    plan = await current_plan(session, user_id)
+    plan = await current_plan(session, user_id, settings=settings)
     timezone = await _timezone(session, user_id)
 
     # Both reads are done. Hand the connection back before the reset and the

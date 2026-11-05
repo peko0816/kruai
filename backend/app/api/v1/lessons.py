@@ -201,7 +201,7 @@ async def _load_viewer(
             sa.select(UserProfile.data_saver).where(UserProfile.user_id == user_id)
         )
     ).scalar_one_or_none()
-    plan = await current_plan(session, user_id)
+    plan = await current_plan(session, user_id, settings=settings)
 
     experiments = Experiments(session_factory=session_factory, settings=settings)
     variant = await experiments.assign(user_id, experiment_key=EXPLAIN_MEDIA.key)
@@ -444,7 +444,7 @@ async def start_lesson(
     """
     now = datetime.datetime.now(datetime.UTC)
     await _load_lesson(session, lesson_id)
-    plan = await current_plan(session, user_id)
+    plan = await current_plan(session, user_id, settings=settings)
     timezone = await _timezone_of(session, user_id)
 
     # Every read first, then the connection goes back, then the day's counters

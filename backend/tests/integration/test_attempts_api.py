@@ -580,6 +580,88 @@ async def test_a_paid_plan_has_no_daily_cap(
     assert response.json()["remaining_attempts"] is None
 
 
+# ------------------------------------------------------------- trial testers
+#
+# D-131: while the trial runs nobody can pay, and a tester stuck on Free three
+# recordings into a twenty-three-recording lesson is testing the paywall. The
+# default signed-in learner in these tests is Telegram id 4242.
+
+TESTER = 4242
+
+
+def trial(settings: Settings, **overrides: Any) -> Settings:
+    return settings.model_copy(update={"trial_telegram_ids": (TESTER,), **overrides})
+
+
+async def test_a_trial_tester_has_no_daily_cap(
+    seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    async with client_for(trial(settings)) as client:
+        headers = await authenticated(client)
+        execute("UPDATE entitlements SET daily_attempts_used = 99")
+
+        response = await attempt(client, seeded["drill"], headers=headers)
+        plan = (await client.get("/api/v1/me/entitlements", headers=headers)).json()["plan"]
+
+    assert response.status_code == 201
+    assert response.json()["remaining_attempts"] is None
+    assert plan == "basic"
+
+
+async def test_a_trial_tester_is_held_to_the_trial_cap_not_basic_s(
+    seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """Basic throttles at 68. With a trial cap of 200 the line is at 300."""
+    async with client_for(trial(settings, cost_cap_trial_usd_cents_monthly=200)) as client:
+        user_id = await sign_in(client, settings)
+        headers = await authenticated(client)
+        spent(execute, user_id, 68)
+
+        assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 201
+
+        spent(execute, user_id, 300)
+
+        assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 429
+
+
+async def test_listing_a_tester_relaxes_no_money_by_default(
+    seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """The trial cap defaults to Basic's: a bigger number is somebody's decision."""
+    async with client_for(trial(settings)) as client:
+        user_id = await sign_in(client, settings)
+        headers = await authenticated(client)
+        spent(execute, user_id, 68)
+
+        assert (await attempt(client, seeded["drill"], headers=headers)).status_code == 429
+
+
+async def test_someone_not_on_the_list_keeps_the_free_plan(
+    seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    async with client_for(settings.model_copy(update={"trial_telegram_ids": (999,)})) as client:
+        headers = await authenticated(client)
+        execute("UPDATE entitlements SET daily_attempts_used = 99")
+
+        response = await attempt(client, seeded["drill"], headers=headers)
+
+    assert response.status_code == 402
+
+
+async def test_taking_a_tester_off_the_list_takes_effect_at_once(
+    seeded: dict[str, uuid.UUID], execute: Execute, settings: Settings
+) -> None:
+    """Read per request, not carried in the token: the same token, a shorter list."""
+    async with client_for(trial(settings)) as client:
+        headers = await authenticated(client)
+    execute("UPDATE entitlements SET daily_attempts_used = 99")
+
+    async with client_for(settings) as client:
+        response = await attempt(client, seeded["drill"], headers=headers)
+
+    assert response.status_code == 402
+
+
 async def test_a_lecture_card_cannot_be_spoken_to(
     client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
 ) -> None:
