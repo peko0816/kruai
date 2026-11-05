@@ -1,9 +1,8 @@
 """How the M0 scripts reach a provider, and how their spending is recorded.
 
-Two promises to hold: ``azure`` reaches the verification adapter while every
-other name still goes through the application registry (D-126), and a billed
-run cannot make a request that ``cost_ledger`` will not see (CLAUDE.md
-section 8).
+Two promises to hold: every name, ``azure`` included, goes through the
+application registry (D-137, D-141), and a billed run cannot make a request
+that ``cost_ledger`` will not see (CLAUDE.md section 8).
 """
 
 from __future__ import annotations
@@ -17,12 +16,12 @@ from typing import Any
 import pytest
 
 from app.services.cost_ledger import LedgerRef, PendingEntry
+from app.services.scoring.azure import AzureScorer
 from app.services.scoring.base import Language
 from app.services.scoring.fake import FakeScorer
 from app.services.tts.azure import AzureTTS
 from app.services.tts.base import Voice
 from app.services.tts.fake import FakeTTS
-from m0.azure import AzureScorer
 from m0.providers import (
     LEDGER_REF,
     LedgerUnavailableError,
@@ -58,7 +57,7 @@ class Captured:
 # ------------------------------------------------------------------ routing
 
 
-def test_azure_reaches_the_verification_adapters() -> None:
+def test_azure_reaches_the_application_adapters() -> None:
     configured = settings(azure_speech_key="k", azure_speech_region="eastasia")
 
     assert isinstance(build_tts("azure", settings=configured), AzureTTS)
@@ -155,7 +154,7 @@ def _refuse_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     async def refuse(*_: Any, **__: Any) -> Any:
         raise AssertionError("a request was made")
 
-    monkeypatch.setattr("m0.azure.scoring.post", refuse)
+    monkeypatch.setattr("app.services.scoring.azure.post", refuse)
     monkeypatch.setattr("app.services.tts.azure.post", refuse)
 
 

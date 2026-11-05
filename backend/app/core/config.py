@@ -187,6 +187,11 @@ class Settings(BaseSettings):
     #: against the allowance and the cost cap (D-135). 0 turns it off.
     drill_masked_rounds: int = Field(default=2, ge=0)
     scoring_timeout_ms: int = Field(default=8000, gt=0)
+    #: [$] US cents per hour of audio assessed, for the cost_ledger estimate.
+    #: Speech-to-text lists at $1 an hour and assessment is billed on top; the
+    #: add-on's US price is unconfirmed, so $2 is the upper bound until a bill
+    #: says otherwise. Not a price learners pay; what the caps are compared to.
+    scoring_price_usd_cents_per_hour: int = Field(default=200, ge=0)
 
     #: Divisor in ``delta = (score - pass_threshold) / base``; zero would raise.
     mastery_delta_base: float = Field(default=40.0, gt=0.0)
@@ -201,9 +206,11 @@ class Settings(BaseSettings):
     sm2_ease_min: float = Field(default=1.3, ge=1.0)
     sm2_ease_penalty: float = Field(default=0.2, ge=0.0)
 
-    #: [M0-1] Whether zh phoneme strings carry tone digits (parse) or tone must
-    #: be inferred (derive). ``auto`` probes at runtime.
-    zh_tone_mode: Literal["parse", "derive", "auto"] = "auto"
+    #: [M0-1] How Mandarin tone is scored. M0-1's first real run found Azure's
+    #: tone digits are the tones it *expected*, not the ones it heard, so tone
+    #: is derived from syllable accuracy; ``parse`` is refused at startup and
+    #: ``auto`` means ``derive`` (D-140, scoring/zh_tone.py).
+    zh_tone_mode: Literal["parse", "derive", "auto"] = "derive"
 
     # ------------------------------------------------------------- 4. 额度与限制
     limit_free_daily_tasks: int = Field(default=3, ge=0)

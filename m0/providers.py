@@ -1,9 +1,8 @@
 """Where the M0 scripts get their providers, and where their spending is written.
 
-**Providers.** TTS comes from the application registry, Azure included, since
-E8 moved it there (D-137). Scoring's ``azure`` still resolves to the
-verification adapter in ``m0.azure`` until E9 moves that too (D-126); every
-other name goes to the application registries untouched.
+**Providers.** Both come from the application registries, Azure included:
+E8 moved TTS there and E9 moved scoring (D-137, D-141). This module stays as
+the one place the M0 scripts ask, and as the ledger below.
 
 **Spending.** CLAUDE.md section 8: a call that is not in ``cost_ledger`` did
 not happen. A billed run therefore opens the ledger *before* its first
@@ -35,7 +34,6 @@ from app.services.scoring import registry as scoring_registry
 from app.services.scoring.base import Language, PronunciationScorer
 from app.services.tts import registry as tts_registry
 from app.services.tts.base import TTSProvider, Voice
-from m0.azure import AzureScorer
 
 LEDGER_REF: Final[LedgerRef] = "content_production"
 
@@ -48,8 +46,6 @@ def build_tts(
 
 
 def get_scorer(language: Language, *, settings: Settings) -> PronunciationScorer:
-    if settings.scoring_provider == AzureScorer.name:
-        return AzureScorer.from_settings(settings)
     return scoring_registry.get_scorer(language, settings=settings)
 
 
