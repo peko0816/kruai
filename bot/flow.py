@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Final, Literal
 
@@ -194,12 +195,33 @@ WEAK_OPEN: Final = "【"
 WEAK_CLOSE: Final = "】"
 
 
+#: A word the learner said that the sentence does not have (Azure's miscue type).
+INSERTION: Final = "Insertion"
+
+
+def sentence_words(words: Iterable[Mapping[str, object]]) -> tuple[tuple[str, bool], ...]:
+    """The API's word list as (word, weak), without the words the learner added.
+
+    An insertion is not in the sentence, so it cannot be aligned with it — and
+    when the same character comes later in the sentence, looking it up would
+    jump there and strand every word in between. Said "里 在杯子里" for
+    水在杯子里, the first 里 matched the last one and nothing was marked, though
+    水 was omitted and 杯子 mispronounced (Q10, D-146).
+    """
+    return tuple(
+        (str(word["word"]), bool(word["weak"]))
+        for word in words
+        if word.get("error_type") != INSERTION
+    )
+
+
 def mark_weak(reference: str, words: tuple[tuple[str, bool], ...]) -> str | None:
     """The reference sentence with its weak words bracketed, or None if none are.
 
-    ``words`` is the API's alignment, in order: (word, weak). Each is looked up
-    from where the previous one ended, so a repeated character is marked where
-    it was said. A word not found — an insertion, or the provider tokenising
+    ``words`` is the alignment of the sentence's own words, in order: (word,
+    weak) — ``sentence_words`` takes the learner's insertions out first. Each is
+    looked up from where the previous one ended, so a repeated character is
+    marked where it was said. A word still not found — the provider tokenising
     differently from the text — is skipped rather than guessed at. Neighbouring
     weak words share one bracket: 【桌子】, not 【桌】【子】.
     """
@@ -391,7 +413,9 @@ __all__ = [
     "Session",
     "Step",
     "Turn",
+    "mark_weak",
     "on_voice_scored",
     "resume",
+    "sentence_words",
     "start",
 ]
