@@ -19,6 +19,7 @@ per voice note.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import hashlib
 import hmac
@@ -56,6 +57,8 @@ class ApiError(RuntimeError):
 class _CachedToken:
     token: str
     expires_at: datetime.datetime
+    #: The interface language stored on the account (Q12, D-148).
+    locale: str
 
 
 def sign_init_data(
@@ -110,8 +113,23 @@ class KruaiApi:
         self._tokens[telegram_id] = _CachedToken(
             token=token,
             expires_at=now + datetime.timedelta(seconds=max(lifetime, 0)),
+            locale=str(body["locale"]),
         )
         return token
+
+    def locale_of(self, telegram_id: int) -> str | None:
+        """The account's interface language, as of the last sign-in or change."""
+        cached = self._tokens.get(telegram_id)
+        return cached.locale if cached is not None else None
+
+    async def set_locale(self, token: str, telegram_id: int, locale: str) -> str:
+        """Store the learner's choice on the account, and remember it here."""
+        body = await self._put("/api/v1/me/locale", token=token, json={"locale": locale})
+        stored = str(body["locale"])
+        cached = self._tokens.get(telegram_id)
+        if cached is not None:
+            self._tokens[telegram_id] = dataclasses.replace(cached, locale=stored)
+        return stored
 
     def forget(self, telegram_id: int) -> None:
         """Drop a cached token, so the next call re-authenticates."""
@@ -202,6 +220,9 @@ class KruaiApi:
         self, path: str, *, token: str | None = None, json: dict[str, Any] | None = None
     ) -> Any:
         return _unwrap(await self._client.post(path, headers=_auth(token), json=json))
+
+    async def _put(self, path: str, *, token: str, json: dict[str, Any]) -> Any:
+        return _unwrap(await self._client.put(path, headers=_auth(token), json=json))
 
 
 def _auth(token: str | None) -> dict[str, str]:

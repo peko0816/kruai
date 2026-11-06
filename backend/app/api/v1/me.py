@@ -1,4 +1,4 @@
-"""GET /api/v1/me/entitlements — what this learner may do today.
+"""GET /api/v1/me/entitlements — what this learner may do today; PUT /me/locale.
 
 Display only. Every number here is read with ``Entitlements.snapshot()``, which
 its own docstring warns must never gate anything: by the time a client acts on
@@ -18,13 +18,14 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep, SessionDep, SessionFactoryDep, SettingsDep
 from app.core.config import Plan
 from app.core.logging import get_logger
-from app.models.users import UserProfile
+from app.core.security import SUPPORTED_LOCALES
+from app.models.users import User, UserProfile
 from app.services.entitlements import UNLIMITED, Entitlements, QuotaReset, current_plan
 
 log = get_logger(__name__)
@@ -89,6 +90,34 @@ async def get_entitlements(
         realtime_seconds_remaining=snapshot.realtime_seconds_remaining,
         resets_at=outcome.next_reset_at,
     )
+
+
+class LocaleIn(BaseModel):
+    locale: str
+
+    @field_validator("locale")
+    @classmethod
+    def _shipped(cls, value: str) -> str:
+        if value not in SUPPORTED_LOCALES:
+            raise ValueError(f"locale must be one of {sorted(SUPPORTED_LOCALES)}")
+        return value
+
+
+class LocaleOut(BaseModel):
+    locale: str
+
+
+@router.put("/locale")
+async def set_locale(payload: LocaleIn, session: SessionDep, user_id: CurrentUserDep) -> LocaleOut:
+    """The interface language this learner chose (Q12, D-148).
+
+    Stored on the account, where sign-in only ever writes it on insert, so a
+    choice outlives every later guess from Telegram's language.
+    """
+    await session.execute(sa.update(User).where(User.id == user_id).values(locale=payload.locale))
+    await session.commit()
+    log.info("me.locale_set", user_id=str(user_id), locale=payload.locale)
+    return LocaleOut(locale=payload.locale)
 
 
 def _allowance(used: int, limit: int) -> AllowanceOut:
