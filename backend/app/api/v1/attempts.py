@@ -62,10 +62,12 @@ from app.services.mastery import (
     MasteryUpdate,
     ReviewSchedule,
     apply_attempt,
+    counts_as_omitted,
     initial_ease_factor,
-    is_passing,
+    is_passing_attempt,
     is_weak_word,
     schedule_review,
+    score_for_mastery,
 )
 from app.services.scoring.base import AssessMode, Language, PronunciationResult
 from app.services.scoring.registry import get_scorer
@@ -284,7 +286,8 @@ async def create_attempt(
         )
         raise ScoringUnavailable(reason=result.error_code or "no_score_returned")
 
-    passed = is_passing(pron_score, settings=settings)
+    omitted = counts_as_omitted((word.error_type for word in result.words), settings=settings)
+    passed = is_passing_attempt(pron_score, omitted=omitted, settings=settings)
     attempt_id = await _record_attempt(
         session,
         user_id=user_id,
@@ -297,7 +300,7 @@ async def create_attempt(
         session,
         user_id=user_id,
         target=target,
-        pron_score=pron_score,
+        pron_score=score_for_mastery(pron_score, omitted=omitted, settings=settings),
         now=now,
         settings=settings,
     )

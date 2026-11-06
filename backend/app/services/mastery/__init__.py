@@ -16,9 +16,12 @@ from app.services.mastery.delta import (
     ScorableItemType,
     apply_attempt,
     clamp_mastery,
+    counts_as_omitted,
     is_passing,
+    is_passing_attempt,
     is_weak_word,
     score_delta,
+    score_for_mastery,
     weight_for,
 )
 from app.services.mastery.review import (
@@ -50,11 +53,14 @@ __all__ = [
     "apply_attempt",
     "build_review_queue",
     "clamp_mastery",
+    "counts_as_omitted",
     "due_candidates",
     "initial_ease_factor",
     "is_passing",
+    "is_passing_attempt",
     "is_weak_word",
     "schedule_review",
     "score_delta",
+    "score_for_mastery",
     "weight_for",
 ]

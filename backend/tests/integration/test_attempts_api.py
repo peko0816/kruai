@@ -481,6 +481,57 @@ async def test_the_scorer_is_told_what_the_recording_is(
     assert seen == [expected]
 
 
+@pytest.mark.parametrize(
+    ("fail_on_omission", "passed", "mastery_rises"),
+    [(True, False, False), (False, True, True)],
+    ids=["rule-on", "rule-off"],
+)
+async def test_a_sentence_said_out_of_order_does_not_pass(
+    seeded: dict[str, uuid.UUID],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    rows: Rows,
+    fail_on_omission: bool,
+    passed: bool,
+    mastery_rises: bool,
+) -> None:
+    """Q11 (D-147): 71.8, with the moved word inserted and omitted — as Azure
+    scored 书上在桌子 on the first deployed attempts."""
+    import dataclasses
+
+    from app.services.scoring import registry as scoring_registry
+    from app.services.scoring.base import WordScore
+    from app.services.scoring.fake import FakeScorer
+
+    class OutOfOrder(FakeScorer):
+        async def assess(self, audio: bytes, **kwargs: Any) -> Any:
+            result = await super().assess(audio, **kwargs)
+            return dataclasses.replace(
+                result,
+                pron_score=71.8,
+                words=(
+                    WordScore(word="书", accuracy=73.0),
+                    WordScore(word="上", accuracy=91.0, error_type="Insertion"),
+                    WordScore(word="在", accuracy=97.0),
+                    WordScore(word="桌子", accuracy=100.0),
+                    WordScore(word="上", accuracy=0.0, error_type="Omission"),
+                ),
+            )
+
+    monkeypatch.setitem(scoring_registry._FACTORIES, "out_of_order", lambda _s: OutOfOrder())
+    configured = settings.model_copy(
+        update={"scoring_provider": "out_of_order", "scoring_fail_on_omission": fail_on_omission}
+    )
+    async with client_for(configured) as client:
+        headers = await authenticated(client)
+        body = (await attempt(client, seeded["drill"], headers=headers)).json()
+
+    assert body["passed"] is passed
+    assert body["scores"]["pron"] == 71.8, "the learner still sees the score Azure gave"
+    assert (body["mastery"]["current"] > body["mastery"]["previous"]) is mastery_rises
+    assert rows("SELECT passed FROM attempts") == [(passed,)]
+
+
 async def test_an_item_without_a_concept_scores_but_advances_nothing(
     client: httpx.AsyncClient, seeded: dict[str, uuid.UUID], rows: Rows
 ) -> None:

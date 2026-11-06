@@ -180,6 +180,10 @@ class Settings(BaseSettings):
     #: [M0-1] Recalibrate once the real score distribution is known. 60 is a
     #: placeholder, not a measured pass mark.
     scoring_pass_threshold: float = Field(default=60.0, ge=0.0, le=100.0)
+    #: A scripted attempt with a word of the sentence left out does not pass,
+    #: whatever its score: Azure barely marks down a sentence said in the wrong
+    #: order (65.6 and 71.8 on the first deployed attempts). Q11, D-147.
+    scoring_fail_on_omission: bool = True
     scoring_max_retry: int = Field(default=3, ge=0)
     #: [$] Masked rounds after a drill is said in full (PRD 3.1 跟读→逐步遮词):
     #: the first hides half the characters, the last all of them. Each round
