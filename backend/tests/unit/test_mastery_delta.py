@@ -358,3 +358,63 @@ def test_a_word_under_the_pass_mark_is_weak_and_one_on_it_is_not() -> None:
 
     assert is_weak_word(accuracy=59.9, error_type=None, settings=configured)
     assert not is_weak_word(accuracy=60.0, error_type="None", settings=configured)
+
+
+# ------------------------------------------------ omissions fail (Q11, D-147)
+
+
+def test_an_omission_fails_an_attempt_whatever_its_score() -> None:
+    """Word order wrong: 书在上 桌子, 71.8 on the first deployed attempts."""
+    from app.services.mastery import counts_as_omitted, is_passing_attempt
+
+    configured = settings()
+    omitted = counts_as_omitted([None, None, "Insertion", None, "Omission"], settings=configured)
+
+    assert omitted is True
+    assert is_passing_attempt(71.8, omitted=omitted, settings=configured) is False
+    assert is_passing_attempt(71.8, omitted=False, settings=configured) is True
+
+
+@pytest.mark.parametrize(
+    "error_types",
+    [[None, None, None], [None, "Mispronunciation"], [None, "Insertion", None], []],
+    ids=["clean", "misread-only", "insertion-only", "no-words"],
+)
+def test_only_an_omission_counts(error_types: list[str | None]) -> None:
+    """A misread word is marked (D-134) but does not fail on its own: the
+    good-group 你几岁 came back with 岁 misread at 76 and was read right."""
+    from app.services.mastery import counts_as_omitted
+
+    assert counts_as_omitted(error_types, settings=settings()) is False
+
+
+def test_the_rule_can_be_switched_off() -> None:
+    from app.services.mastery import counts_as_omitted
+
+    configured = settings(SCORING_FAIL_ON_OMISSION="false")
+
+    assert counts_as_omitted(["Omission"], settings=configured) is False
+
+
+@pytest.mark.parametrize(
+    ("pron", "expected"),
+    [(71.8, 60.0), (60.0, 60.0), (45.0, 45.0)],
+    ids=["over-the-mark-capped", "at-the-mark", "under-the-mark-unchanged"],
+)
+def test_an_attempt_failed_for_an_omission_cannot_raise_mastery(
+    pron: float, expected: float
+) -> None:
+    """Failed, so no progress: counted at most the pass mark, where the delta is zero."""
+    from app.services.mastery import score_delta, score_for_mastery
+
+    configured = settings()
+    counted = score_for_mastery(pron, omitted=True, settings=configured)
+
+    assert counted == expected
+    assert score_delta(counted, settings=configured) <= 0
+
+
+def test_without_an_omission_the_score_counts_as_it_is() -> None:
+    from app.services.mastery import score_for_mastery
+
+    assert score_for_mastery(71.8, omitted=False, settings=settings()) == 71.8

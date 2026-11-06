@@ -24,6 +24,7 @@ every term in the formula is configuration rather than a literal.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -124,9 +125,38 @@ def is_passing(pron_score: float, *, settings: Settings) -> bool:
     return pron_score >= settings.scoring_pass_threshold
 
 
+#: The error type a provider reports for a word of the sentence not said.
+OMISSION: Final = "Omission"
+
 #: Error types a provider reports for a word the learner got wrong or left out.
 #: An insertion is a word they added, which has no place in the sentence to mark.
-WEAK_ERROR_TYPES: Final = frozenset({"Mispronunciation", "Omission"})
+WEAK_ERROR_TYPES: Final = frozenset({"Mispronunciation", OMISSION})
+
+
+def counts_as_omitted(error_types: Iterable[str | None], *, settings: Settings) -> bool:
+    """Whether a word of the sentence was left out, and that is to fail the attempt.
+
+    Said in the wrong order, a sentence comes back with the moved word both
+    inserted and omitted, and Azure takes few points for it: 65.6 and 71.8 on
+    the owner's first deployed attempts, both over the pass mark. No correct
+    reading of the twenty good-group recordings had an omission (Q11, D-147).
+    """
+    return settings.scoring_fail_on_omission and OMISSION in error_types
+
+
+def is_passing_attempt(pron_score: float, *, omitted: bool, settings: Settings) -> bool:
+    """attempts.passed: over the pass mark, with nothing of the sentence left out."""
+    return is_passing(pron_score, settings=settings) and not omitted
+
+
+def score_for_mastery(pron_score: float, *, omitted: bool, settings: Settings) -> float:
+    """The score an attempt moves mastery by.
+
+    The provider's, except that an attempt failed for an omission counts at
+    most the pass mark: a failed attempt must not raise mastery, which is the
+    contradiction ``is_passing`` exists to rule out, seen from the other side.
+    """
+    return min(pron_score, settings.scoring_pass_threshold) if omitted else pron_score
 
 
 def is_weak_word(*, accuracy: float, error_type: str | None, settings: Settings) -> bool:
