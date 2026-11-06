@@ -18,7 +18,7 @@
 | ⑥b | `pipeline/packs/zh-HSK1.confirm2.csv` | 12 | 同 ⑥ | — | ✅ **已完成**（2026-11-03）|
 | ⑦ | `pipeline/packs/zh-HSK1.review3.csv` | 117 | 高棉语母语者 | **M1 验收线**（第三轮） | 2–4 小时 |
 | ⑦b | `pipeline/packs/zh-HSK1.confirm3.csv` | 29 | 同 ⑦ | — | 15 分钟 |
-| ⑧ | `locales/km.confirm.csv` | 6 | 高棉语母语者（做过 ② 的译者最合适） | — | 10 分钟 |
+| ⑧ | `locales/km.confirm.csv` | 11 | 高棉语母语者（做过 ② 的译者最合适） | — | 10 分钟 |
 
 **建议顺序：② → ③（含 ③b）。** 两份可以是同一个人。
 先派 ② 不是因为它更重要，而是它的反馈回路最短——29 条短句，交回来机器当场判对错。

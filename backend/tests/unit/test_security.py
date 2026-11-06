@@ -288,9 +288,11 @@ def test_non_string_language_code_falls_back_rather_than_failing() -> None:
         ("zh", "zh"),
         ("zh-hans", "zh"),
         ("zh-Hant", "zh"),
-        ("en", "en"),
-        ("en-US", "en"),
-        ("EN", "en"),
+        # Telegram has no Khmer interface; Cambodians mostly run it in English
+        # (Q12, D-148). English is chosen with /language, not guessed.
+        ("en", "km"),
+        ("en-US", "km"),
+        ("EN", "km"),
         (" km ", "km"),
         ("ru", "km"),
         ("th", "km"),

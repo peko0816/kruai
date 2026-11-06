@@ -138,16 +138,25 @@ def verify_init_data(
     )
 
 
-def normalize_locale(language_code: str | None) -> str:
-    """Map a Telegram language tag onto the three locales we ship.
+#: The one Telegram language that picks its own interface on first contact.
+#: Telegram has no official Khmer interface, so Cambodian learners mostly run it
+#: in English; taking "en" at its word showed them an English bot. Everyone
+#: else starts in Khmer and can switch with /language (Q12, D-148).
+_FIRST_CONTACT_LOCALES: Final[frozenset[str]] = frozenset({"zh"})
 
-    ``zh-hans`` and ``zh-hant`` both become ``zh``: the difference is script,
-    and our Chinese strings are one file. Anything unrecognised becomes Khmer.
+
+def normalize_locale(language_code: str | None) -> str:
+    """The interface language a new account starts in, from its Telegram tag.
+
+    Chinese for a Chinese Telegram (``zh-hans`` and ``zh-hant`` alike: the
+    difference is script, and our Chinese strings are one file); Khmer for
+    everything else, English included. A learner's later choice is stored on
+    the account and never overwritten by this guess.
     """
     if not language_code:
         return DEFAULT_LOCALE
     primary = language_code.strip().lower().split("-")[0]
-    return primary if primary in SUPPORTED_LOCALES else DEFAULT_LOCALE
+    return primary if primary in _FIRST_CONTACT_LOCALES else DEFAULT_LOCALE
 
 
 def issue_access_token(

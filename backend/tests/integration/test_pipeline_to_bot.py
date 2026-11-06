@@ -73,12 +73,16 @@ async def bot_for(
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://kruai.test") as http:
-            yield Conversation(
+            bot = Conversation(
                 KruaiApi(http, bot_token=BOT_TOKEN),
                 SessionStore(redis_client, ttl_seconds=settings.bot_session_ttl_seconds),
                 max_retry=settings.scoring_max_retry,
                 masked_rounds=masked_rounds,
             )
+            # These assertions read English. An English Telegram starts in
+            # Khmer (D-148), so the learner picks English first, as one would.
+            await bot.on_language(LEARNER, "en")
+            yield bot
 
 
 @pytest.fixture

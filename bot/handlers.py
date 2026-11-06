@@ -13,6 +13,7 @@ worth testing beyond "it passed the right arguments along".
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -20,6 +21,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.core.logging import get_logger
+from app.core.security import normalize_locale
 from bot import i18n
 from bot.api_client import ApiError, KruaiApi
 from bot.audio import AudioSender
@@ -87,12 +89,34 @@ class Conversation:
         self._masked_rounds = masked_rounds
 
     async def on_start(self, learner: Learner) -> list[Outgoing]:
+        learner = await self._in_their_language(learner)
         return _render(
-            [Reply("bot.welcome"), Reply("bot.help"), Reply("bot.help_review")], learner.locale
+            [
+                Reply("bot.welcome"),
+                Reply("bot.help"),
+                Reply("bot.help_review"),
+                Reply("bot.help_language"),
+            ],
+            learner.locale,
         )
+
+    async def on_language_menu(self, learner: Learner) -> list[Outgoing]:
+        """The three interface languages, each a command to tap (Q12, D-148)."""
+        learner = await self._in_their_language(learner)
+        return _render([Reply("bot.language_menu")], learner.locale)
+
+    async def on_language(self, learner: Learner, locale: str) -> list[Outgoing]:
+        """Switch the interface language, stored on the account, and say so in it."""
+        try:
+            token = await self._token(learner)
+            chosen = await self._api.set_locale(token, learner.telegram_id, locale)
+        except ApiError as exc:
+            return self._on_api_error(exc, await self._in_their_language(learner))
+        return _render([Reply("bot.language_set")], chosen)
 
     async def on_status(self, learner: Learner) -> list[Outgoing]:
         """What is left of today, in the learner's own words."""
+        learner = await self._in_their_language(learner)
         try:
             token = await self._token(learner)
             entitlements = await self._api.entitlements(token)
@@ -122,6 +146,7 @@ class Conversation:
 
     async def on_learn(self, learner: Learner) -> list[Outgoing]:
         """Start a lesson, or carry on with the one already open."""
+        learner = await self._in_their_language(learner)
         try:
             token = await self._token(learner)
             stored = await self._sessions.load(learner.telegram_id)
@@ -156,6 +181,7 @@ class Conversation:
     async def on_review(self, learner: Learner) -> list[Outgoing]:
         """Practise what is due (D-133). Replaces whatever was open: a lesson's
         progress is the server's, and /learn picks it up again."""
+        learner = await self._in_their_language(learner)
         try:
             token = await self._token(learner)
             steps = await self._api.review_steps(token)
@@ -168,6 +194,7 @@ class Conversation:
 
     async def on_stop(self, learner: Learner) -> list[Outgoing]:
         """Put the lesson down. Progress already recorded stays recorded."""
+        learner = await self._in_their_language(learner)
         await self._sessions.clear(learner.telegram_id)
         return _render([Reply("bot.lesson_stopped")], learner.locale)
 
@@ -175,6 +202,7 @@ class Conversation:
         self, learner: Learner, *, audio: bytes, filename: str = "voice.ogg"
     ) -> list[Outgoing]:
         """Score one recording against the step the learner is on."""
+        learner = await self._in_their_language(learner)
         session = await self._sessions.load(learner.telegram_id)
         if session is None:
             return _render([Reply("bot.not_in_lesson")], learner.locale)
@@ -255,6 +283,21 @@ class Conversation:
     async def _token(self, learner: Learner) -> str:
         return await self._api.token_for(learner.telegram_id, language_code=learner.language_code)
 
+    async def _in_their_language(self, learner: Learner) -> Learner:
+        """The learner, speaking the language stored on their account.
+
+        Signing in returns it, and the token cache keeps it, so this costs a
+        request once per token, not per message. If the API cannot be reached
+        the first-contact guess stands; the call that follows reports the
+        failure in it.
+        """
+        try:
+            await self._token(learner)
+        except ApiError:
+            return learner
+        stored = self._api.locale_of(learner.telegram_id)
+        return dataclasses.replace(learner, locale=stored) if stored else learner
+
     def _on_api_error(self, exc: ApiError, learner: Learner) -> list[Outgoing]:
         """Turn an API refusal into something a learner can act on.
 
@@ -296,10 +339,11 @@ def learner_from(update: Update) -> Learner:
     if user is None:  # pragma: no cover - Telegram always sends one for these updates
         raise ValueError("update has no sender")
     language_code = user.language_code
-    primary = (language_code or "").split("-")[0].lower()
     return Learner(
         telegram_id=user.id,
-        locale=i18n.normalise_locale(primary),
+        # The same first-contact rule the API applies when it creates the
+        # account (D-148); the account's stored choice replaces it.
+        locale=normalize_locale(language_code),
         language_code=language_code,
     )
 
@@ -339,6 +383,25 @@ async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await _send(update, context, await _conversation(context).on_review(learner_from(update)))
 
 
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _send(
+        update, context, await _conversation(context).on_language_menu(learner_from(update))
+    )
+
+
+#: The tappable commands in bot.language_menu, and the locale each one picks.
+LANGUAGE_COMMANDS: Final[dict[str, str]] = {"lang_km": "km", "lang_zh": "zh", "lang_en": "en"}
+
+
+def _set_language_to(locale: str) -> Any:
+    async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await _send(
+            update, context, await _conversation(context).on_language(learner_from(update), locale)
+        )
+
+    return handler
+
+
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _send(update, context, await _conversation(context).on_stop(learner_from(update)))
 
@@ -374,6 +437,9 @@ def register(application: Any, conversation: Conversation, audio: AudioSender) -
     application.add_handler(CommandHandler("review", review_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("language", language_command))
+    for command, locale in LANGUAGE_COMMANDS.items():
+        application.add_handler(CommandHandler(command, _set_language_to(locale)))
     application.add_handler(MessageHandler(filters.VOICE, voice_message))
 
 

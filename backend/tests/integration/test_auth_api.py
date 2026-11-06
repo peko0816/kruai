@@ -170,3 +170,62 @@ async def test_a_malformed_request_body_is_a_validation_error(
     response = await client.post(AUTH_URL, json=body)
 
     assert response.status_code == 422
+
+
+# --------------------------------------------------- interface language (D-148)
+
+
+@pytest.mark.parametrize(
+    ("language_code", "expected"),
+    [("en", "km"), ("km", "km"), ("zh-hans", "zh"), (None, "km")],
+    ids=["english-telegram", "khmer", "chinese-telegram", "none"],
+)
+async def test_sign_in_says_which_language_to_speak(
+    client: httpx.AsyncClient, language_code: str | None, expected: str
+) -> None:
+    """Telegram has no Khmer interface, so an English one starts in Khmer (Q12)."""
+    response = await client.post(
+        AUTH_URL, json={"init_data": fresh(telegram_id=6100, language_code=language_code)}
+    )
+
+    assert response.json()["locale"] == expected
+
+
+async def test_a_chosen_language_is_stored_and_outlives_the_next_sign_in(
+    client: httpx.AsyncClient, settings: Settings, rows: Rows
+) -> None:
+    response = await client.post(
+        AUTH_URL, json={"init_data": fresh(telegram_id=6200, language_code="en")}
+    )
+    token = response.json()["access_token"]
+
+    changed = await client.put(
+        "/api/v1/me/locale", json={"locale": "en"}, headers={"Authorization": f"Bearer {token}"}
+    )
+    again = await client.post(
+        AUTH_URL, json={"init_data": fresh(telegram_id=6200, language_code="zh")}
+    )
+
+    assert changed.status_code == 200
+    assert changed.json() == {"locale": "en"}
+    assert again.json()["locale"] == "en", "Telegram's language is a first guess only"
+    assert rows("SELECT locale FROM users WHERE telegram_id = 6200") == [("en",)]
+
+
+@pytest.mark.parametrize("locale", ["fr", "", "EN"], ids=["unshipped", "empty", "wrong-case"])
+async def test_only_a_shipped_language_can_be_chosen(
+    client: httpx.AsyncClient, settings: Settings, rows: Rows, locale: str
+) -> None:
+    response = await client.post(AUTH_URL, json={"init_data": fresh(telegram_id=6300)})
+    token = response.json()["access_token"]
+
+    refused = await client.put(
+        "/api/v1/me/locale", json={"locale": locale}, headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert refused.status_code == 422
+    assert rows("SELECT locale FROM users WHERE telegram_id = 6300") == [("km",)]
+
+
+async def test_choosing_a_language_needs_a_session(client: httpx.AsyncClient) -> None:
+    assert (await client.put("/api/v1/me/locale", json={"locale": "en"})).status_code == 401

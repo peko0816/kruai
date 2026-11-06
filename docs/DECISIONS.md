@@ -3527,3 +3527,31 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   要看试运营的数据：`attempts.phoneme_detail` 里存着每次的原始结果，可以回查。
 - 回退成本：低。`SCORING_FAIL_ON_OMISSION=false` 即回到原规则。
 - 影响范围：`app/services/mastery/delta.py`、`app/api/v1/attempts.py`、`app/core/config.py` 与对应测试、配置文档。
+
+## D-148 界面语言：默认高棉语，学员可用 /language 切换，选择存在账号上
+
+- 日期：2026-11-06（项目所有者选「默认高棉语，可用命令切换」）
+- 背景：Bot 按每条消息里 Telegram 的界面语言选文案；API 首次登录时也按它写入 `users.locale`
+  （英文版写 `en`）。但 Telegram 没有官方高棉语界面，柬埔寨学员大多用英文版，于是会看到**英文界面**——
+  与「以高棉语教学」不符。首次上线时，项目所有者的中文版 Telegram 显示中文界面，由此发现。
+  另外，Bot 从不读 `users.locale`，学员即使改了也无处生效。
+- 选择：
+  1. **首次登录的猜测**：只有中文版 Telegram 用中文，其他一律高棉语（英文版也是）。API 建账号与 Bot 用同一个函数
+     （`app.core.security.normalize_locale`），不会两边不一致。
+  2. **账号上的选择为准**：登录接口在返回令牌的同时返回 `users.locale`；Bot 随令牌一起缓存，每个令牌周期只多一次请求。
+     `users.locale` 仍然只在建账号时写入，之后登录不会覆盖（D-029 的约定不变）。
+  3. **切换**：`/language` 列出 `/lang_km`、`/lang_zh`、`/lang_en`，点哪个就切到哪个；
+     新增 `PUT /api/v1/me/locale`，只接受三种已上线的语言。切换成功后，用新语言回复确认。
+     `/start` 的命令列表里加上 `/language`。
+  4. API 暂时连不上时，Bot 先按首次登录的猜测说话，随后那次调用照常报错。
+- 文案：新增 `bot.help_language`、`bot.language_menu`、`bot.language_set` 三条。中、英为我们所写；
+  高棉语为我们起草，已加进 `locales/km.confirm.csv` 待母语者确认。语言名称用各自的文字书写
+  （ភាសាខ្មែរ / 中文 / English），不翻译。
+- 顺带发现：现有高棉语文案里有两条夹着英文单词 "of"（`bot.lesson_resumed`、`bot.score_failed_retry`），
+  以前测试都用英文界面，一直没暴露。没有直接改，已附建议（「of」→「នៃ」）加进确认表，共 11 行待确认。
+- 测试：首次猜测（API 与 Bot 两端）、登录返回语言、切换后存储且不被下次登录覆盖、
+  只接受三种语言、未登录不能改、英文版 Telegram 先见高棉语并能切换且 Bot 重启后保持、中文版 Telegram 先见中文、
+  三种语言的菜单都列出全部命令。9 个变异全部被杀死。原有对话测试改为测试学员先切到英文（断言读的是英文）。
+- 回退成本：低。没有数据库迁移；`users.locale` 列早已存在。
+- 影响范围：`app/core/security.py`、`app/api/v1/auth.py`、`app/api/v1/me.py`、`bot/api_client.py`、
+  `bot/handlers.py`、`locales/*.json` 与对应测试。

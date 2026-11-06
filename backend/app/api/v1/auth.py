@@ -62,6 +62,9 @@ class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
+    #: The interface language stored on the account, so a client speaks it
+    #: from the first message without a second request (Q12, D-148).
+    locale: str
 
 
 @router.post("/telegram", status_code=status.HTTP_200_OK)
@@ -76,7 +79,9 @@ async def authenticate_telegram(
         now=now,
         max_age_seconds=settings.telegram_init_data_max_age_seconds,
     )
-    user_id = await provision_account(session, identity=identity, settings=settings, now=now)
+    user_id, locale = await provision_account(
+        session, identity=identity, settings=settings, now=now
+    )
     token = issue_access_token(user_id, settings=settings, now=now)
 
     log.info(
@@ -87,7 +92,7 @@ async def authenticate_telegram(
         # freshness window ever has to be tuned.
         init_data_age_seconds=int((now - identity.auth_date).total_seconds()),
     )
-    return AccessTokenResponse(access_token=token.token, expires_in=token.expires_in)
+    return AccessTokenResponse(access_token=token.token, expires_in=token.expires_in, locale=locale)
 
 
 async def provision_account(
@@ -96,14 +101,15 @@ async def provision_account(
     identity: TelegramIdentity,
     settings: Settings,
     now: datetime.datetime,
-) -> uuid.UUID:
-    """The user id behind this Telegram account, creating the account if new.
+) -> tuple[uuid.UUID, str]:
+    """The user id behind this Telegram account and its stored interface
+    language, creating the account if new.
 
     Raises:
         AuthenticationFailed: the account is soft-deleted. Re-authenticating
             must not undelete it, so the sign-in is refused instead.
     """
-    user_id, deleted_at = await _upsert_user(session, identity=identity, now=now)
+    user_id, deleted_at, locale = await _upsert_user(session, identity=identity, now=now)
     if deleted_at is not None:
         # Roll back rather than commit: the upsert already touched
         # last_active_at, and a deleted account should not look active.
@@ -119,13 +125,13 @@ async def provision_account(
 
     if created:
         log.info("auth.telegram.provisioned", user_id=str(user_id), timezone=timezone)
-    return user_id
+    return user_id, locale
 
 
 async def _upsert_user(
     session: AsyncSession, *, identity: TelegramIdentity, now: datetime.datetime
-) -> tuple[uuid.UUID, datetime.datetime | None]:
-    """Insert or touch the users row, returning its id and deletion state.
+) -> tuple[uuid.UUID, datetime.datetime | None, str]:
+    """Insert or touch the users row, returning its id, deletion state and locale.
 
     DO UPDATE rather than DO NOTHING because DO NOTHING returns no row on
     conflict, and the returning user is the common case — we would then need a
@@ -144,12 +150,13 @@ async def _upsert_user(
             last_active_at=now,
         )
         .on_conflict_do_update(index_elements=["telegram_id"], set_={"last_active_at": now})
-        .returning(User.id, User.deleted_at)
+        .returning(User.id, User.deleted_at, User.locale)
     )
     row = (await session.execute(statement)).one()
     user_id: uuid.UUID = row[0]
     deleted_at: datetime.datetime | None = row[1]
-    return user_id, deleted_at
+    locale: str = row[2]
+    return user_id, deleted_at, locale
 
 
 async def _ensure_profile(session: AsyncSession, *, user_id: uuid.UUID) -> str:

@@ -148,11 +148,15 @@ async def conversation(settings: Settings, redis_client: Redis) -> AsyncIterator
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://kruai.test") as http:
-            yield Conversation(
+            conversation = Conversation(
                 KruaiApi(http, bot_token=BOT_TOKEN),
                 SessionStore(redis_client, ttl_seconds=settings.bot_session_ttl_seconds),
                 max_retry=settings.scoring_max_retry,
             )
+            # The assertions here read English. An English Telegram starts in
+            # Khmer (D-148), so the learner picks English first, as one would.
+            await conversation.on_language(LEARNER, "en")
+            yield conversation
 
 
 def texts(messages: list[Any]) -> list[str]:
@@ -219,6 +223,7 @@ async def test_a_lesson_survives_the_bot_restarting(
                 )
 
     async with fresh_bot() as before:
+        await before.on_language(LEARNER, "en")  # stored on the account, not the bot
         await before.on_learn(LEARNER)
         await before.on_voice(LEARNER, audio=AUDIO)
 
@@ -482,3 +487,57 @@ async def test_an_added_word_does_not_hide_what_was_left_out(
     replies = await conversation.on_voice(LEARNER, audio=AUDIO)
 
     assert any("【我】要水" in message.text for message in replies)
+
+
+# ---------------------------------------------------- interface language (D-148)
+
+
+async def test_an_english_telegram_is_greeted_in_khmer_and_can_switch(
+    settings: Settings, redis_client: Redis
+) -> None:
+    """Q12: Telegram has no Khmer interface, so Cambodian learners mostly run it
+    in English. They start in Khmer; /language lets anyone choose; the choice
+    is on the account, so a restarted bot still speaks it."""
+    from bot import i18n
+
+    learner = Learner(telegram_id=770300, locale="km", language_code="en")
+
+    @asynccontextmanager
+    async def bot() -> AsyncIterator[Conversation]:
+        app: FastAPI = create_app(settings)
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://k.test") as http:
+                yield Conversation(
+                    KruaiApi(http, bot_token=BOT_TOKEN),
+                    SessionStore(redis_client, ttl_seconds=settings.bot_session_ttl_seconds),
+                    max_retry=settings.scoring_max_retry,
+                )
+
+    async with bot() as first:
+        greeting = await first.on_start(learner)
+        menu = await first.on_language_menu(learner)
+        switched = await first.on_language(learner, "zh")
+        status = await first.on_status(learner)
+
+    async with bot() as restarted:
+        after_restart = await restarted.on_start(learner)
+
+    assert greeting[0].text == i18n.t("bot.welcome", locale="km")
+    assert greeting[-1].text == i18n.t("bot.help_language", locale="km")
+    assert "/lang_zh" in menu[0].text
+    assert switched[0].text == i18n.t("bot.language_set", locale="zh")
+    assert status[0].text.startswith("计划")
+    assert after_restart[0].text == i18n.t("bot.welcome", locale="zh")
+
+
+async def test_a_chinese_telegram_starts_in_chinese(
+    conversation: Conversation, redis_client: Redis
+) -> None:
+    from bot import i18n
+
+    chinese = Learner(telegram_id=770301, locale="zh", language_code="zh-hans")
+
+    greeting = await conversation.on_start(chinese)
+
+    assert greeting[0].text == i18n.t("bot.welcome", locale="zh")
