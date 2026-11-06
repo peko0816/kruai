@@ -448,3 +448,37 @@ async def test_a_weak_recording_shows_which_characters_to_look_at(
     replies = await conversation.on_voice(LEARNER, audio=AUDIO)
 
     assert any("【我要水】" in message.text for message in replies)
+
+
+async def test_an_added_word_does_not_hide_what_was_left_out(
+    conversation: Conversation, unit: dict[str, uuid.UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q10 (D-146), end to end: the learner adds a 水 before 我要水 and drops
+    我. The added 水 also ends the sentence; aligned, it jumped there and
+    nothing was marked. Taken out first, 我 is marked."""
+    import dataclasses
+
+    from app.services.scoring import registry as scoring_registry
+    from app.services.scoring.base import WordScore
+    from app.services.scoring.fake import FakeScorer
+
+    class AddsAWord(FakeScorer):
+        async def assess(self, audio: bytes, **kwargs: Any) -> Any:
+            result = await super().assess(audio, **kwargs)
+            return dataclasses.replace(
+                result,
+                pron_score=55.0,
+                words=(
+                    WordScore(word="水", accuracy=80.0, error_type="Insertion"),
+                    WordScore(word="我", accuracy=0.0, error_type="Omission"),
+                    WordScore(word="要", accuracy=95.0),
+                    WordScore(word="水", accuracy=90.0),
+                ),
+            )
+
+    monkeypatch.setitem(scoring_registry._FACTORIES, "fake", lambda _settings: AddsAWord())
+    await conversation.on_learn(LEARNER)
+
+    replies = await conversation.on_voice(LEARNER, audio=AUDIO)
+
+    assert any("【我】要水" in message.text for message in replies)

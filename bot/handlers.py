@@ -31,6 +31,7 @@ from bot.flow import (
     on_voice_scored,
     resume,
     review_lesson,
+    sentence_words,
     start,
     start_review,
 )
@@ -207,8 +208,7 @@ class Conversation:
             max_retry=self._max_retry,
             masked_rounds=self._masked_rounds,
             marked=mark_weak(
-                result.get("reference_text") or "",
-                tuple((str(w["word"]), bool(w["weak"])) for w in result.get("words", ())),
+                result.get("reference_text") or "", sentence_words(result.get("words", ()))
             ),
         )
         return await self._play(learner, lesson, turn, token, review=session.is_review)

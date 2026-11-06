@@ -22,6 +22,7 @@ from bot.flow import (
     on_voice_scored,
     resume,
     review_lesson,
+    sentence_words,
     start,
     start_review,
 )
@@ -404,6 +405,71 @@ def test_a_word_not_in_the_sentence_is_skipped_not_guessed() -> None:
     words = (("我", False), ("呢", True), ("要", True), ("水", False))
 
     assert mark_weak("我要水", words) == "我【要】水"
+
+
+def _api_words(*words: tuple[str, float, str | None]) -> list[dict[str, object]]:
+    """The API's words, as the attempt response carries them. ``weak`` is the
+    API's own rule (D-134): misread, omitted, or below 60."""
+    return [
+        {
+            "word": word,
+            "accuracy": accuracy,
+            "error_type": error_type,
+            "weak": error_type in ("Mispronunciation", "Omission") or accuracy < 60,
+        }
+        for word, accuracy, error_type in words
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reference", "words", "expected"),
+    [
+        (
+            # Tones wrong; Azure heard 里 在杯子里. The added 里 used to match
+            # the sentence's last character and leave nothing marked.
+            "水在杯子里。",
+            _api_words(
+                ("里", 73, "Insertion"),
+                ("水", 0, "Omission"),
+                ("在", 100, None),
+                ("杯子", 58, "Mispronunciation"),
+                ("里", 88, None),
+            ),
+            "【水】在【杯子】里。",
+        ),
+        (
+            # Word order wrong: 书在上 桌子.
+            "书在桌子上。",
+            _api_words(
+                ("书", 63, None),
+                ("在", 97, None),
+                ("上", 70, "Insertion"),
+                ("桌子", 79, None),
+                ("上", 0, "Omission"),
+            ),
+            "书在桌子【上】。",
+        ),
+        (
+            # Said right: nothing to point at.
+            "书在桌子上。",
+            _api_words(("书", 68, None), ("在", 100, None), ("桌子", 100, None), ("上", 66, None)),
+            None,
+        ),
+    ],
+    ids=["insertion-repeats-a-later-character", "word-order", "said-right"],
+)
+def test_attempts_from_the_first_trial_are_marked(
+    reference: str, words: list[dict[str, object]], expected: str | None
+) -> None:
+    """Q10 (D-146): the API's words from the owner's first attempts on the
+    deployed bot, 2026-11-06, scored by Azure."""
+    assert mark_weak(reference, sentence_words(words)) == expected
+
+
+def test_only_insertions_are_left_out() -> None:
+    words = _api_words(("我", 90, None), ("呢", 80, "Insertion"), ("要", 0, "Omission"))
+
+    assert sentence_words(words) == (("我", False), ("要", True))
 
 
 def test_nothing_weak_means_nothing_to_show() -> None:
