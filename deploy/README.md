@@ -2,6 +2,8 @@
 
 一台服务器、Docker Compose（PRD 第 8 节）。设计取舍见 `docs/DECISIONS.md` D-144。
 
+试运营部署在 DigitalOcean 多伦多（tor1）的一台 droplet 上，**和另一个项目共用**（D-145）。动手之前先读第六节。
+
 ## 它长什么样
 
 ```
@@ -25,7 +27,7 @@
 
 | 项目 | 说明 |
 |---|---|
-| 服务器 | 新加坡区，Ubuntu 22.04 或 24.04，2 核 CPU、2GB 内存起步、20GB 硬盘。装好 Docker（含 `docker compose` 插件），装法见 <https://docs.docker.com/engine/install/ubuntu/> |
+| 服务器 | 用现有的 DigitalOcean tor1 droplet（D-145）。需要 Docker 和 `docker compose` 插件（v2）。KruAI 实测约占 175MB 内存，学员多起来估计 300–400MB；镜像和数据约 1GB 硬盘 |
 | Telegram Bot token | 在 Telegram 里找 @BotFather，发 `/newbot`，按提示起名字，拿到 token |
 | Azure 评分密钥 | 用现有的 `ai-tutor-speech`（eastasia）。密钥只填进服务器上的 `deploy/kruai.env`，不要发在聊天里 |
 | 测试者的 Telegram 数字 id | 每人在 Telegram 里给 @userinfobot 发任意消息，它会回复一串数字 |
@@ -189,3 +191,36 @@ docker compose -f deploy/compose.yml down
 - 服务器防火墙只开 SSH。所有服务都不对外监听，这一点在 `compose.yml` 里已经保证了。
 - `deploy/kruai.env` 和 `deploy/postgres.env` 只有你能读，它们不在 git 里，也不会打进镜像。
 - 换 Bot token 或 Azure 密钥：改 `deploy/kruai.env`，再执行 `docker compose -f deploy/compose.yml up -d`。
+
+## 六、与另一个项目共用服务器（D-145）
+
+这台 droplet 上还跑着另一个项目。KruAI 的部署已经做到互不干扰：
+
+- **不占端口。** KruAI 不映射任何主机端口，不会和另一个项目抢 80、443、5432 这些端口。
+- **名字分开。** KruAI 的容器、网络、数据卷都以 `kruai` 开头，用 `docker ps` 可以一眼分清。
+- **内存有上限。** 每个服务都设了上限，全部加起来最多 1.7GB，实际占用约 175MB。即使 KruAI 出了问题，也挤不掉另一个项目。
+
+**维护时必须遵守：**
+
+- **只用带 `-f deploy/compose.yml` 的命令。** 这样的命令只作用于 KruAI，第四节里的命令都是这样写的。
+- **绝对不要运行下面这三条命令：**
+  - `docker system prune --volumes`
+  - `docker volume prune`
+  - `docker system prune -a`
+
+  另一个项目的容器只要处于停止状态，它的数据卷和镜像就会被这几条命令当作"没人用"而删掉，删了无法恢复。
+- **要清理磁盘，只用下面这一条。** 它只删除没有标签的悬空镜像，不碰任何数据卷：
+
+```bash
+docker image prune
+```
+
+- **重启服务器会同时影响两个项目。** KruAI 的服务会自动重新启动，另一个项目是否会自动启动，取决于它自己的设置。
+
+**部署前先看一眼服务器的现状（服务器）：**
+
+```bash
+free -h; df -h /; nproc; lsb_release -ds; docker --version; docker compose version; docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
+```
+
+把输出发给我，我来确认内存、硬盘和 Docker 版本是否够用。这条命令只读不改，输出里也不含任何密钥。

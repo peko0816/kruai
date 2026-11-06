@@ -182,7 +182,7 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 
 | | |
 |---|---|
-| **要办什么** | VPS（新加坡区）、`ADMIN_TELEGRAM_IDS`、测试者的 Telegram id。`JWT_SECRET` 与数据库密码由 `deploy/init-env.sh` 生成。步骤见 `deploy/README.md` |
+| **要办什么** | 服务器：用现有的 DigitalOcean tor1 droplet，与另一个项目共用（D-145）。另需 `ADMIN_TELEGRAM_IDS`、测试者的 Telegram id。`JWT_SECRET` 与数据库密码由 `deploy/init-env.sh` 生成。步骤见 `deploy/README.md` |
 | **试运营不需要** | 域名与 TLS 证书：服务器不开对外端口，Bot 轮询 Telegram、自己取音频上传（D-143、D-144）。接支付回调、改 webhook、做 Mini App 时再办 |
 | **L-4** | ✅ 已解决（H1）：生产 compose 里数据库与 Redis 不映射任何端口；开发用的 `docker-compose.yml` 改为只在 127.0.0.1 监听 |
 

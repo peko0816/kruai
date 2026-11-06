@@ -3465,3 +3465,23 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
 - 回退成本：低。都是新增文件；日志改动只多遮蔽、少记录。
 - 影响范围：`Dockerfile`、`.dockerignore`、`deploy/`、`docker-compose.yml`、`.gitignore`、
   `app/core/logging.py`、`bot/main.py` 与对应测试。
+
+## D-145 试运营服务器：DigitalOcean 多伦多（tor1），与另一个项目共用一台 droplet
+
+- 日期：2026-11-06（项目所有者决定：另一个项目已在 tor1 开了 droplet，测试期共用以节省费用）
+- 背景：PRD 第 8 节定的是新加坡区。项目所有者先提出用深圳服务器，被否掉：大陆封锁 Telegram，
+  Bot 无法工作；绕过封锁有合规风险；Docker Hub 与 GitHub 访问不稳定；Azure 评分要跨境。
+  随后改为现有的加拿大服务器。
+- 选择：部署在现有的 tor1 droplet 上，与另一个项目共用。
+  1. **互不干扰**：KruAI 不映射主机端口；compose 项目名 `kruai`，容器、网络、数据卷都带这个前缀；
+     每个服务设内存上限（应用服务各 512MB、PostgreSQL 512MB、Redis 128MB、媒体 64MB，合计上限 1.7GB）。
+     本机实测全部服务约占 175MB。
+  2. **维护纪律**（写进 `deploy/README.md` 第六节）：只用带 `-f deploy/compose.yml` 的命令；
+     禁止 `docker system prune --volumes`、`docker volume prune`、`docker system prune -a`——
+     另一个项目的容器一旦停着，它的数据卷与镜像会被当作无主删除。
+- 代价：服务器离 Telegram 与 Azure（香港）都隔着太平洋。估计学员每发一条语音，多等 0.5–1 秒才出分（未实测）。
+  试运营可以接受；测试者反馈慢时，再考虑把评分资源换到北美区域，或迁回亚洲。
+- 不影响的：额度按学员自己的时区重置（`entitlements/reset.py`），与服务器所在地无关；镜像带时区数据库，已验证。
+- 还要确认的：droplet 的剩余内存、硬盘与 Docker 版本（`deploy/README.md` 第六节的只读检查命令）。
+- 回退成本：低。部署形态与地区无关，换服务器只需按手册在新机器上重做一遍，再迁移数据库备份。
+- PRD 修订提议：第 8 节「部署」一行改为「Docker Compose，单 VPS（试运营：DigitalOcean tor1，D-145）」。
