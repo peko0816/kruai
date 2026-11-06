@@ -3474,14 +3474,17 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   随后改为现有的加拿大服务器。
 - 选择：部署在现有的 tor1 droplet 上，与另一个项目共用。
   1. **互不干扰**：KruAI 不映射主机端口；compose 项目名 `kruai`，容器、网络、数据卷都带这个前缀；
-     每个服务设内存上限（应用服务各 512MB、PostgreSQL 512MB、Redis 128MB、媒体 64MB，合计上限 1.7GB）。
-     本机实测全部服务约占 175MB。
+     每个服务设内存上限（API 384MB、Bot 256MB、PostgreSQL 384MB、Redis 64MB、媒体 64MB，合计约 1.1GB）。
+     本机实测全部服务约占 175MB；按这组上限完整演练（迁移、导入、模拟 Bot），没有容器因超内存被杀。
   2. **维护纪律**（写进 `deploy/README.md` 第六节）：只用带 `-f deploy/compose.yml` 的命令；
      禁止 `docker system prune --volumes`、`docker volume prune`、`docker system prune -a`——
      另一个项目的容器一旦停着，它的数据卷与镜像会被当作无主删除。
 - 代价：服务器离 Telegram 与 Azure（香港）都隔着太平洋。估计学员每发一条语音，多等 0.5–1 秒才出分（未实测）。
   试运营可以接受；测试者反馈慢时，再考虑把评分资源换到北美区域，或迁回亚洲。
 - 不影响的：额度按学员自己的时区重置（`entitlements/reset.py`），与服务器所在地无关；镜像带时区数据库，已验证。
-- 还要确认的：droplet 的剩余内存、硬盘与 Docker 版本（`deploy/README.md` 第六节的只读检查命令）。
+- droplet 检查结果（2026-11-06）：内存 3.8GB，可用约 1.5GB，**没有 swap**；硬盘剩 53GB；2 核；Ubuntu 24.04；
+  Docker 29、Compose v5。另一个项目 polymarket 的容器都没有映射主机端口。最初设的上限合计 1.7GB，
+  超过了可用内存，起不到保护作用，因此收紧到约 1.1GB。建议加 2GB swap：没有 swap 时，
+  内存一旦用尽，系统会直接杀进程，可能杀到另一个项目。是否添加由项目所有者决定。
 - 回退成本：低。部署形态与地区无关，换服务器只需按手册在新机器上重做一遍，再迁移数据库备份。
 - PRD 修订提议：第 8 节「部署」一行改为「Docker Compose，单 VPS（试运营：DigitalOcean tor1，D-145）」。

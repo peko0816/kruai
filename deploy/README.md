@@ -27,7 +27,7 @@
 
 | 项目 | 说明 |
 |---|---|
-| 服务器 | 用现有的 DigitalOcean tor1 droplet（D-145）。需要 Docker 和 `docker compose` 插件（v2）。KruAI 实测约占 175MB 内存，学员多起来估计 300–400MB；镜像和数据约 1GB 硬盘 |
+| 服务器 | 用现有的 DigitalOcean tor1 droplet（D-145），已检查：Docker 和 Compose 版本、硬盘都够用，内存见第六节。KruAI 实测约占 175MB 内存，学员多起来估计 300–400MB；镜像和数据约 1GB 硬盘 |
 | Telegram Bot token | 在 Telegram 里找 @BotFather，发 `/newbot`，按提示起名字，拿到 token |
 | Azure 评分密钥 | 用现有的 `ai-tutor-speech`（eastasia）。密钥只填进服务器上的 `deploy/kruai.env`，不要发在聊天里 |
 | 测试者的 Telegram 数字 id | 每人在 Telegram 里给 @userinfobot 发任意消息，它会回复一串数字 |
@@ -198,7 +198,12 @@ docker compose -f deploy/compose.yml down
 
 - **不占端口。** KruAI 不映射任何主机端口，不会和另一个项目抢 80、443、5432 这些端口。
 - **名字分开。** KruAI 的容器、网络、数据卷都以 `kruai` 开头，用 `docker ps` 可以一眼分清。
-- **内存有上限。** 每个服务都设了上限，全部加起来最多 1.7GB，实际占用约 175MB。即使 KruAI 出了问题，也挤不掉另一个项目。
+- **内存有上限。** 每个服务都设了上限，全部加起来最多约 1.1GB，实际占用约 175MB。即使 KruAI 出了问题，也挤不掉另一个项目。
+
+**2026-11-06 检查结果：** 内存共 3.8GB，可用约 1.5GB，**没有 swap**；硬盘剩 53GB；2 核 CPU；Ubuntu 24.04；Docker 29、Compose v5。另一个项目（polymarket）的三个容器都没有映射主机端口，和 KruAI 不冲突。
+
+- **建议加 2GB swap。** 现在没有 swap，内存一旦用尽，系统会直接杀掉占内存最多的进程，可能杀的是另一个项目。swap 作为缓冲，会让服务在内存紧张时变慢，而不是被杀。是否添加由你决定，因为它会改变整台服务器的设置。添加方法见 DigitalOcean 的说明：<https://www.digitalocean.com/community/tutorials/how-to-add-swap-space-on-ubuntu-22-04>
+- **第一次构建镜像时，两个 CPU 核会忙一两分钟**，另一个项目在这段时间可能会稍慢。
 
 **维护时必须遵守：**
 

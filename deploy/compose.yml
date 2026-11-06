@@ -2,8 +2,9 @@
 # VPS). D-144 explains the shape; deploy/README.md is the runbook.
 #
 # The server is shared with another project (D-145): every service has a memory
-# ceiling, so KruAI cannot starve it, and nothing is published to the host, so
-# the two cannot collide on a port.
+# ceiling, 1.1 GB in all against about 1.5 GB the host had free and no swap, so
+# KruAI cannot starve it; nothing is published to the host, so the two cannot
+# collide on a port. Measured use is about 175 MB.
 #
 # Nothing listens on a public port. The bot polls Telegram, and the API, the
 # media server, PostgreSQL and Redis are reachable only on this compose network.
@@ -22,7 +23,7 @@ x-app: &app
     dockerfile: Dockerfile
   env_file: kruai.env
   restart: unless-stopped
-  mem_limit: 512m
+  mem_limit: 384m
   logging: &logging
     driver: json-file
     options:
@@ -39,7 +40,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     env_file: postgres.env
-    mem_limit: 512m
+    mem_limit: 384m
     environment:
       POSTGRES_USER: kruai
       POSTGRES_DB: kruai
@@ -60,7 +61,7 @@ services:
     # Bot sessions live here. No password: it is unreachable from outside this
     # network, which is the property L-4 asked for.
     command: ["redis-server", "--appendonly", "yes"]
-    mem_limit: 128m
+    mem_limit: 64m
     volumes:
       - redis_data:/data
     healthcheck:
@@ -85,6 +86,7 @@ services:
   bot:
     <<: *app
     command: ["python", "-m", "bot.main"]
+    mem_limit: 256m
     depends_on:
       api:
         condition: service_healthy
