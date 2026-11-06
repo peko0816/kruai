@@ -16,8 +16,12 @@ remember where each learner is.
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Callable
+
 import httpx
 from redis.asyncio import Redis
+from telegram.error import InvalidToken
 from telegram.ext import Application
 
 from app.core.config import Settings, get_settings
@@ -62,12 +66,30 @@ def build_application(settings: Settings) -> Application:  # type: ignore[type-a
     return application
 
 
-def main() -> None:
+def run(poll: Callable[[], object]) -> int:
+    """Run the bot until it stops; the exit code says how it stopped.
+
+    Nothing escapes to the interpreter's own traceback printer, which writes
+    straight to stderr past the log pipeline — and a rejected token is quoted
+    in the exception python-telegram-bot raises (D-144).
+    """
+    try:
+        poll()
+    except InvalidToken:
+        log.error("bot.token_rejected", hint="check TELEGRAM_BOT_TOKEN in deploy/kruai.env")
+        return 1
+    except Exception:
+        log.exception("bot.crashed")
+        return 1
+    return 0
+
+
+def main() -> int:
     settings = get_settings()
     configure_logging(log_level=settings.log_level, json_output=settings.env != "dev")
     log.info("bot.starting", api=settings.bot_api_base_url, env=settings.env)
-    build_application(settings).run_polling()
+    return run(build_application(settings).run_polling)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

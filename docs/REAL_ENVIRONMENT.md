@@ -162,6 +162,8 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 
 ### 6. 对象存储 + CDN
 
+> **试运营不需要**（D-144）：音频由服务器内部的媒体服务提供，Bot 取到后上传给 Telegram。Mini App（M3）要让手机直接播放时再办。
+
 | | |
 |---|---|
 | **要办什么** | S3 兼容存储（Cloudflare R2 / AWS S3 / 阿里云 OSS 均可）+ 一个公开读的 bucket + CDN 域名 |
@@ -180,8 +182,9 @@ CSV 里每行带四样东西：key、英文原文、**这句话里必须保留�
 
 | | |
 |---|---|
-| **要办什么** | VPS（新加坡区）、域名、TLS 证书、`JWT_SECRET`（32 字符以上）、`ADMIN_TELEGRAM_IDS` |
-| **上线前必须做的一件事** | **把 Redis 绑回 loopback**。`docker-compose.yml` 现在把 PostgreSQL 和 Redis 都绑在 `0.0.0.0`，且 Redis 没有密码——同一网段任何人都能直连。这是遗留约束 **L-4**，当时确认暂缓，但那是本地开发的判断，上生产之前必须改（`ports: ["127.0.0.1:6379:6379"]`） |
+| **要办什么** | 服务器：用现有的 DigitalOcean tor1 droplet，与另一个项目共用（D-145）。另需 `ADMIN_TELEGRAM_IDS`、测试者的 Telegram id。`JWT_SECRET` 与数据库密码由 `deploy/init-env.sh` 生成。步骤见 `deploy/README.md` |
+| **试运营不需要** | 域名与 TLS 证书：服务器不开对外端口，Bot 轮询 Telegram、自己取音频上传（D-143、D-144）。接支付回调、改 webhook、做 Mini App 时再办 |
+| **L-4** | ✅ 已解决（H1）：生产 compose 里数据库与 Redis 不映射任何端口；开发用的 `docker-compose.yml` 改为只在 127.0.0.1 监听 |
 
 ---
 

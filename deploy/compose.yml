@@ -1,0 +1,125 @@
+# KruAI on one server, for the invite-only trial (PRD 8: Docker Compose, single
+# VPS). D-144 explains the shape; deploy/README.md is the runbook.
+#
+# The server is shared with another project (D-145): every service has a memory
+# ceiling, 1.1 GB in all against about 1.5 GB the host had free and no swap, so
+# KruAI cannot starve it; nothing is published to the host, so the two cannot
+# collide on a port. Measured use is about 175 MB.
+#
+# Nothing listens on a public port. The bot polls Telegram, and the API, the
+# media server, PostgreSQL and Redis are reachable only on this compose network.
+# Add a public HTTPS entry point when something outside must call in: payment
+# callbacks, the webhook mode PRD 8 names, the Mini App (M3).
+#
+#   docker compose -f deploy/compose.yml run --rm migrate
+#   docker compose -f deploy/compose.yml up -d --build
+
+name: kruai
+
+x-app: &app
+  image: kruai-app:latest
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  env_file: kruai.env
+  restart: unless-stopped
+  mem_limit: 384m
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: postgres.env
+    mem_limit: 384m
+    environment:
+      POSTGRES_USER: kruai
+      POSTGRES_DB: kruai
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kruai -d kruai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Bot sessions live here. No password: it is unreachable from outside this
+    # network, which is the property L-4 asked for.
+    command: ["redis-server", "--appendonly", "yes"]
+    mem_limit: 64m
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  api:
+    <<: *app
+    command: ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      # The API refuses to start on a misconfigured provider (selfcheck), so
+      # "accepting connections" means "configured".
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "bot.main"]
+    mem_limit: 256m
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  media:
+    # Serves the published lesson audio to the bot, which uploads it to
+    # Telegram (D-143). Internal only; PUBLIC_MEDIA_BASE_URL is http://media.
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    mem_limit: 64m
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/packs/published:/srv/media:ro
+    logging: *logging
+
+  # ---- one-off jobs: `docker compose -f deploy/compose.yml run --rm <name>` ----
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    profiles: ["tools"]
+
+  import:
+    <<: *app
+    restart: "no"
+    entrypoint: ["python", "-m", "pipeline.import_pack"]
+    volumes:
+      - ./data/packs:/data/packs
+    profiles: ["tools"]
+
+volumes:
+  postgres_data:
+  redis_data:

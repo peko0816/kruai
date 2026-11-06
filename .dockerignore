@@ -1,0 +1,22 @@
+# Only what the image needs: backend/, bot/, pipeline/ code, locales/.
+# Everything else stays out — above all secrets and generated content.
+.git
+.github
+.env
+.env.*
+**/.env
+deploy/*.env
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.DS_Store
+docs
+m0
+interfaces
+node_modules
+# Packs and their audio are data, copied to the server and mounted, never baked in.
+pipeline/packs
+**/tests
