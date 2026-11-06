@@ -8,7 +8,8 @@ Two things about it shape this module:
 * **It takes 16 kHz mono 16-bit WAV, or Ogg Opus, up to 60 seconds.** Phone
   recordings are usually 44.1 or 48 kHz, so the common failure is a format
   refusal, and it is caught here — before the request, where it costs nothing
-  — with the ffmpeg line that fixes it.
+  — with the ffmpeg line that fixes it. Both formats are billed by their real
+  length, read from the file (Ogg Opus: ``scoring/ogg.py``).
 * **The response shape.** The REST endpoint puts the scores directly on each
   node (seen on 2026-11-05); the SDK nests them under ``PronunciationAssessment``.
   Both shapes are read, and anything else comes back as
@@ -47,6 +48,7 @@ from app.services.scoring.base import (
     PronunciationScorer,
     WordScore,
 )
+from app.services.scoring.ogg import opus_seconds
 from app.services.scoring.zh_tone import ToneMode, check_tone_mode, tone_score
 
 _SAMPLE_RATE: Final = 16_000
@@ -178,13 +180,17 @@ def assessment_header(reference_text: str, language: Language) -> str:
     return base64.b64encode(json.dumps(params, ensure_ascii=False).encode()).decode("ascii")
 
 
-def inspect_audio(
-    audio: bytes, audio_format: str
-) -> tuple[str, float | None] | PronunciationResult:
+def inspect_audio(audio: bytes, audio_format: str) -> tuple[str, float] | PronunciationResult:
     """The Content-Type to send and the length to bill, or why it cannot be sent."""
     if audio_format == "ogg":
-        # Opus carries no cheap length; billing assumes the longest allowed.
-        return "audio/ogg; codecs=opus", None
+        # Telegram voice notes. The length is read from the container (Q8,
+        # D-142); billing every one as 60 s throttled learners twelve times early.
+        length = opus_seconds(audio)
+        if length is None:
+            return _failure(
+                "scoring.unsupported_audio", f"not a readable Ogg Opus recording; {_FFMPEG_HINT}"
+            )
+        return _too_long(length) or ("audio/ogg; codecs=opus", length)
     if audio_format != "wav":
         return _failure(
             "scoring.unsupported_format",
@@ -204,21 +210,32 @@ def inspect_audio(
             f"wav is {channels}ch/{width * 8}bit/{rate}Hz, azure needs 1ch/16bit/16000Hz; "
             f"{_FFMPEG_HINT}",
         )
+    return _too_long(seconds) or (
+        f"audio/wav; codecs=audio/pcm; samplerate={_SAMPLE_RATE}",
+        seconds,
+    )
+
+
+def _too_long(seconds: float) -> PronunciationResult | None:
+    """The refusal for a recording longer than the endpoint takes, else None.
+
+    Used as ``_too_long(s) or accepted``: a PronunciationResult is a plain
+    dataclass and always truthy.
+    """
     if seconds > _MAX_SECONDS:
         return _failure(
             "scoring.audio_too_long", f"{seconds:.1f}s; the endpoint takes {_MAX_SECONDS:.0f}s"
         )
-    return f"audio/wav; codecs=audio/pcm; samplerate={_SAMPLE_RATE}", seconds
+    return None
 
 
-def estimate_cost(seconds: float | None, *, usd_cents_per_hour: int) -> int:
-    """Thousandths of a US cent, rounded up (D-136). Unknown length is billed as the maximum.
+def estimate_cost(seconds: float, *, usd_cents_per_hour: int) -> int:
+    """Thousandths of a US cent, rounded up (D-136), for a recording of known length.
 
     The rate is SCORING_PRICE_USD_CENTS_PER_HOUR: the owner sets cost caps from
     pricing, so the estimate they are compared against is configuration too.
     """
-    length = _MAX_SECONDS if seconds is None else seconds
-    return math.ceil(length * usd_cents_per_hour * _MILLICENTS_PER_CENT / 3600)
+    return math.ceil(seconds * usd_cents_per_hour * _MILLICENTS_PER_CENT / 3600)
 
 
 def parse(

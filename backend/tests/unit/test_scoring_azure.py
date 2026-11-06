@@ -23,6 +23,7 @@ from app.services.provider_errors import ProviderConfigurationError
 from app.services.scoring.azure import AzureScorer, assessment_header, estimate_cost, parse
 from app.services.scoring.base import AssessMode, Language
 from tests.unit.azure_recorder import KEY, Recorder, no_sleep
+from tests.unit.ogg_builder import opus
 
 
 def wav(*, seconds: float = 1.0, rate: int = 16_000, channels: int = 1, width: int = 2) -> bytes:
@@ -185,8 +186,10 @@ async def test_a_good_recording_is_sent_and_scored() -> None:
         (b"not a wav", "wav", "scoring.unsupported_audio"),
         (wav(seconds=61), "wav", "scoring.audio_too_long"),
         (b"ID3", "mp3", "scoring.unsupported_format"),
+        (b"OggS" + bytes(200), "ogg", "scoring.unsupported_audio"),
+        (opus(61), "ogg", "scoring.audio_too_long"),
     ],
-    ids=["44k", "stereo", "8bit", "garbage", "too-long", "mp3"],
+    ids=["44k", "stereo", "8bit", "garbage", "too-long", "mp3", "bad-ogg", "long-ogg"],
 )
 async def test_audio_azure_would_refuse_is_refused_here_for_free(
     audio: bytes, audio_format: str, code: str
@@ -206,6 +209,23 @@ async def test_audio_azure_would_refuse_is_refused_here_for_free(
     assert result.error_code == code
     assert result.cost_usd_millicents == 0
     assert recorder.requests == []
+
+
+async def test_a_telegram_voice_note_is_billed_by_its_length() -> None:
+    """Q8 (D-142): 5 s, not the 60 s every Ogg recording used to be billed as."""
+    recorder = Recorder(httpx.Response(200, json=FLAT))
+
+    result = await scorer(recorder).assess(
+        opus(5.0),
+        language=Language.ZH_CN,
+        mode=AssessMode.SCRIPTED,
+        reference_text="我要水。",
+        audio_format="ogg",
+    )
+
+    assert recorder.requests[0].headers["Content-Type"] == "audio/ogg; codecs=opus"
+    assert result.ok
+    assert result.cost_usd_millicents == 278, "5 s at $2 an hour"
 
 
 async def test_the_format_refusal_says_how_to_fix_it() -> None:
@@ -280,12 +300,12 @@ async def test_the_price_per_hour_is_configuration() -> None:
     assert result.cost_usd_millicents == 1000, "36 s at $1 an hour is one cent"
 
 
-def test_scoring_cost_rounds_up_and_assumes_the_worst_when_unknown() -> None:
-    """base.py: conservatively overestimate when the real figure is unknown."""
+def test_scoring_cost_rounds_up() -> None:
+    """base.py: conservatively overestimate. Every accepted recording now has a
+    known length (Q8), so rounding up is the only overestimate left."""
     assert estimate_cost(0.5, usd_cents_per_hour=200) == 28
     assert estimate_cost(18, usd_cents_per_hour=200) == 1000
     assert estimate_cost(19, usd_cents_per_hour=200) == 1056
-    assert estimate_cost(None, usd_cents_per_hour=200) == estimate_cost(60, usd_cents_per_hour=200)
 
 
 async def test_a_non_json_200_is_malformed_not_a_crash() -> None:
