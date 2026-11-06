@@ -23,6 +23,7 @@ from telegram.ext import Application
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from bot.api_client import KruaiApi
+from bot.audio import AudioSender
 from bot.handlers import Conversation, register
 from bot.session import SessionStore
 
@@ -53,8 +54,11 @@ def build_application(settings: Settings) -> Application:  # type: ignore[type-a
         masked_rounds=settings.drill_masked_rounds,
     )
 
+    # Lesson recordings are fetched from PUBLIC_MEDIA_BASE_URL and uploaded (D-143).
+    audio = AudioSender(httpx.AsyncClient(timeout=30.0, follow_redirects=True))
+
     application = Application.builder().token(token).build()
-    register(application, conversation)
+    register(application, conversation, audio)
     return application
 
 

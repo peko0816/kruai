@@ -22,6 +22,7 @@ from telegram.ext import ContextTypes
 from app.core.logging import get_logger
 from bot import i18n
 from bot.api_client import ApiError, KruaiApi
+from bot.audio import AudioSender
 from bot.flow import (
     Lesson,
     Reply,
@@ -306,13 +307,17 @@ def learner_from(update: Update) -> Learner:
 # ----------------------------------------------------- python-telegram-bot glue
 
 
-async def _send(update: Update, messages: list[Outgoing]) -> None:
+async def _send(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, messages: list[Outgoing]
+) -> None:
     message = update.effective_message
     if message is None:  # pragma: no cover - command and voice updates carry one
         return
+    audio: AudioSender = context.application.bot_data["audio"]
     for outgoing in messages:
         if outgoing.audio_url:
-            await message.reply_voice(voice=outgoing.audio_url, caption=outgoing.text)
+            # Uploaded, not linked: Telegram takes only OGG by link (Q9, D-143).
+            await audio.send(message, text=outgoing.text, audio_url=outgoing.audio_url)
         else:
             await message.reply_text(outgoing.text)
 
@@ -323,23 +328,23 @@ def _conversation(context: ContextTypes.DEFAULT_TYPE) -> Conversation:
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send(update, await _conversation(context).on_start(learner_from(update)))
+    await _send(update, context, await _conversation(context).on_start(learner_from(update)))
 
 
 async def learn_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send(update, await _conversation(context).on_learn(learner_from(update)))
+    await _send(update, context, await _conversation(context).on_learn(learner_from(update)))
 
 
 async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send(update, await _conversation(context).on_review(learner_from(update)))
+    await _send(update, context, await _conversation(context).on_review(learner_from(update)))
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send(update, await _conversation(context).on_stop(learner_from(update)))
+    await _send(update, context, await _conversation(context).on_stop(learner_from(update)))
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send(update, await _conversation(context).on_status(learner_from(update)))
+    await _send(update, context, await _conversation(context).on_status(learner_from(update)))
 
 
 async def voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -351,17 +356,19 @@ async def voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     audio: bytes = bytes(await telegram_file.download_as_bytearray())
     await _send(
         update,
+        context,
         await _conversation(context).on_voice(
             learner_from(update), audio=audio, filename=f"{message.voice.file_unique_id}.ogg"
         ),
     )
 
 
-def register(application: Any, conversation: Conversation) -> None:
+def register(application: Any, conversation: Conversation, audio: AudioSender) -> None:
     """Attach the handlers to a python-telegram-bot application."""
     from telegram.ext import CommandHandler, MessageHandler, filters
 
     application.bot_data["conversation"] = conversation
+    application.bot_data["audio"] = audio
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("learn", learn_command))
     application.add_handler(CommandHandler("review", review_command))
