@@ -17,6 +17,7 @@ Needs `TELEGRAM_BOT_TOKEN` in `.env` — from BotFather — plus a running API a
 |---|---|
 | `flow.py` | the lesson state machine. Pure: no Telegram, no HTTP, no clock. This is where the conversation's behaviour lives and where it is tested. |
 | `handlers.py` | `Conversation` takes plain values (a learner id, some audio bytes) so a whole lesson can be played through without Telegram; the functions below it are the python-telegram-bot adapters. |
+| `audio.py` | Lesson recordings are uploaded, not linked: by link Telegram takes only OGG for a voice note, and the packs are MP3. Each clip is uploaded once and resent by `file_id`; a refused voice note goes as audio, an unreachable clip leaves the text (D-143). |
 | `api_client.py` | the only way this process reaches the system. HTTP, never an import of the services. |
 | `session.py` | where each learner is, in Redis, with a day's expiry. |
 | `i18n.py` | the message catalogue. No sentence is written in Python. |
