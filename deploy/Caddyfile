@@ -1,0 +1,11 @@
+# Internal static server for lesson audio. Plain HTTP on the compose network;
+# no public port, so no certificate (D-144).
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	root * /srv/media
+	file_server
+}

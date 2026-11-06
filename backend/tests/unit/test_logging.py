@@ -142,3 +142,98 @@ def test_log_level_is_honoured(capsys: pytest.CaptureFixture[str]) -> None:
     finally:
         structlog.reset_defaults()
         logging.getLogger().handlers = []
+
+
+# ------------------------------------------------------------ tokens in text
+
+#: Shaped like a real bot token: a numeric id, a colon, 35 URL-safe characters.
+BOT_TOKEN = "7412345678:AAHk3_x9QpZrT0vWmY2bLcD4eFgHiJkLmNo"
+
+
+def _json_lines(capsys: pytest.CaptureFixture[str]) -> list[dict[str, object]]:
+    return [json.loads(line) for line in capsys.readouterr().err.strip().splitlines()]
+
+
+def test_a_bot_token_inside_a_library_message_is_scrubbed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """python-telegram-bot logs the request URL, which carries the token (D-144)."""
+    configure_logging(log_level="INFO", json_output=True)
+    try:
+        logging.getLogger("telegram.ext").error(
+            "POST https://api.telegram.org/bot%s/getUpdates failed", BOT_TOKEN
+        )
+        record = _json_lines(capsys)[-1]
+
+        assert BOT_TOKEN not in json.dumps(record)
+        assert record["event"] == f"POST https://api.telegram.org/bot{REDACTED}/getUpdates failed"
+    finally:
+        structlog.reset_defaults()
+        logging.getLogger().handlers = []
+
+
+def test_a_bot_token_is_scrubbed_from_development_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(log_level="INFO", json_output=False)
+    try:
+        logging.getLogger("telegram.ext").error("GET .../bot%s/getMe", BOT_TOKEN)
+        err = capsys.readouterr().err
+
+        assert BOT_TOKEN not in err
+        assert REDACTED in err
+    finally:
+        structlog.reset_defaults()
+        logging.getLogger().handlers = []
+
+
+def test_a_bot_token_quoted_in_a_traceback_is_scrubbed(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(log_level="INFO", json_output=True)
+    try:
+        try:
+            raise ValueError(f"The token `{BOT_TOKEN}` was rejected by the server.")
+        except ValueError:
+            get_logger("test").exception("bot.failed")
+        record = _json_lines(capsys)[-1]
+
+        assert BOT_TOKEN not in json.dumps(record)
+        assert REDACTED in str(record["exception"])
+    finally:
+        structlog.reset_defaults()
+        logging.getLogger().handlers = []
+
+
+def test_request_lines_are_kept_out_at_info(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(log_level="INFO", json_output=True)
+    try:
+        logging.getLogger("httpx").info("HTTP Request: POST https://api.telegram.org/x")
+        logging.getLogger("httpcore").info("connect_tcp.started")
+        logging.getLogger("httpx").warning("httpx.warned")
+        err = capsys.readouterr().err
+
+        assert "HTTP Request" not in err
+        assert "connect_tcp" not in err
+        assert "httpx.warned" in err
+    finally:
+        structlog.reset_defaults()
+        logging.getLogger().handlers = []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "lesson d754344b-d6c4-474e-a38b-cdda06e53a02 step 1",
+        "2026-11-06T08:59:53.946125Z",
+        "telegram_id=990001 score 72:5",
+        "http://media/zh/77/7772b3d2f3a52eb407a58.mp3",
+        "error:scoring_unsupported_audio_format_refused",
+        "lesson 10:30 attempt_scored_without_reference_text",
+    ],
+    ids=["uuid", "timestamp", "ids", "media-url", "code", "time-then-word"],
+)
+def test_ordinary_text_is_not_mistaken_for_a_token(text: str) -> None:
+    from app.core.logging import scrub_processor
+
+    assert scrub_processor(None, "info", {"event": text})["event"] == text

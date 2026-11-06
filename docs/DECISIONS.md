@@ -3431,3 +3431,37 @@ Stars 的「回调」是 Telegram 推给 bot webhook 的 update，用
   14 个变异全部被杀死。
 - 回退成本：低。
 - 影响范围：`bot/audio.py`、`bot/handlers.py`、`bot/main.py`、`bot/tests/test_audio.py`。
+
+## D-144 试运营部署：单机 Compose，服务器不开任何对外端口
+
+- 日期：2026-11-06（项目所有者：「代码没问题就开始部署吧」）
+- 背景：PRD 第 8 节定了 Docker Compose + 单台新加坡 VPS，没定具体形态。原计划要域名、TLS 证书、
+  对象存储与 CDN（REAL_ENVIRONMENT 第 6、8 项）。
+- 选择：
+  1. **一个应用镜像**（`Dockerfile`）跑 API、Bot、数据库迁移与课包导入，进程由命令区分；
+     以非 root 用户运行；`.env`、课包、测试、文档都不进镜像（`.dockerignore`）。
+  2. **不开对外端口**（`deploy/compose.yml`）：Bot 用轮询（D-049），课程音频由 Bot 从内部媒体服务
+     （Caddy 静态服务）取到后上传给 Telegram（D-143）。API、媒体、PostgreSQL、Redis 只在 compose 内部网络。
+     所以**试运营不需要域名、证书与对象存储**；接支付回调、改 webhook、做 Mini App 时再加对外入口。
+  3. **`PUBLIC_MEDIA_BASE_URL=http://media`**。这个地址在导入时写进数据库；将来换成对外地址时，
+     要么重新导入课包，要么改数据库里的地址——届时对象存储（D-097）也要一起实现，一并处理。
+  4. **生产配置**：`ENV=prod`、评分 Azure、TTS 与 LLM 用 fake（运行时不调用它们，R1）、
+     支付关闭（`PAYMENTS_ENABLED=false`，D-100）、测试者成本上限 500 美分（D-136）。
+     这套配置在本机通过了启动自检。
+  5. **`deploy/init-env.sh`** 生成 JWT 密钥与数据库密码，写入只有本人可读的文件，从不打印；
+     已有文件时拒绝覆盖。
+  6. **后台任务（续费提醒、支付对账）暂不部署**：支付关闭时它们没有可处理的数据。开通支付时加进 compose。
+- **演练时发现并修复的问题**：
+  1. **Bot token 会写进日志**。HTTP 库每次请求都在 INFO 级别记录完整网址，而 Telegram 的网址里含 token；
+     Bot 每隔几秒轮询一次。token 被拒时，库抛出的异常里也引用了 token，Python 会把原始堆栈直接打到标准错误。
+     修复：日志管道按格式遮蔽任何形如 Bot token 的文字（含异常堆栈）；HTTP 库的请求日志调到 WARNING；
+     Bot 入口接住所有异常，经日志管道记录后退出，token 被拒时只写一行提示。
+     复测：用格式与真 token 相同的假 token 启动 5 次，日志中 token 出现 0 次。
+  2. 开发用的 `docker-compose.yml` 把数据库与 Redis 绑在 `0.0.0.0`（L-4）：改为 `127.0.0.1`。
+  3. 10 月 #56 把 1073 个音频（16MB）误提交进 git：移出版本库并加入忽略（历史中仍在，无敏感内容）。
+- 本机演练：镜像 332MB；迁移、导入 v2 课包（48 课、1152 条、1112 段音频）；生产模式启动自检通过；
+  用 Bot 的真实代码走「开始 → 学习 → 状态」：测试者显示为 basic，讲解与跟读音频都从内部媒体服务取到。
+  所有容器都没有映射到主机端口。
+- 回退成本：低。都是新增文件；日志改动只多遮蔽、少记录。
+- 影响范围：`Dockerfile`、`.dockerignore`、`deploy/`、`docker-compose.yml`、`.gitignore`、
+  `app/core/logging.py`、`bot/main.py` 与对应测试。

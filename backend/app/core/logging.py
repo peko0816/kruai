@@ -12,11 +12,19 @@ same renderer so a production log stream is uniformly parseable.
 The redaction processor makes "never log secrets" a property of the pipeline
 rather than a rule people have to remember at each call site. It is the last
 line of defence, not permission to pass secrets to the logger.
+
+Key names cannot catch a secret inside a sentence. Telegram puts the bot token
+in every request URL (``https://api.telegram.org/bot<token>/getUpdates``), and
+httpx logs that URL, as text, on every poll; a rejected token is quoted in the
+exception. So anything shaped like a bot token is scrubbed from every string
+value, tracebacks included, and the request-per-line libraries are kept at
+WARNING (D-144).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from typing import Final
 
@@ -47,6 +55,13 @@ _SENSITIVE_EXACT: Final[frozenset[str]] = frozenset(
 #: Depth cap so a self-referential structure cannot hang the logger.
 _MAX_REDACT_DEPTH: Final = 4
 
+#: A Telegram bot token: the bot's numeric id, a colon, then 35 URL-safe
+#: characters. Wherever it appears in text.
+_BOT_TOKEN: Final = re.compile(r"\d{5,}:[A-Za-z0-9_-]{30,}")
+
+#: Libraries that log each HTTP request at INFO, URL included.
+_REQUEST_LOGGERS: Final[tuple[str, ...]] = ("httpx", "httpcore")
+
 
 def is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
@@ -71,6 +86,14 @@ def redact_processor(logger: WrappedLogger, method_name: str, event_dict: EventD
             event_dict[key] = REDACTED
         else:
             event_dict[key] = _redact_value(event_dict[key], 0)
+    return event_dict
+
+
+def scrub_processor(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
+    """Replace anything shaped like a bot token inside string values."""
+    for key, value in event_dict.items():
+        if isinstance(value, str):
+            event_dict[key] = _BOT_TOKEN.sub(REDACTED, value)
     return event_dict
 
 
@@ -99,10 +122,13 @@ def configure_logging(*, log_level: str = "INFO", json_output: bool = False) -> 
     if json_output:
         # ConsoleRenderer formats exceptions itself; format_exc_info would
         # consume exc_info first and leave it with nothing to render.
-        render_chain: list[Processor] = [structlog.processors.format_exc_info]
+        # Scrubbed again once the traceback is text: exception messages quote tokens.
+        render_chain: list[Processor] = [structlog.processors.format_exc_info, scrub_processor]
         renderer = structlog.processors.JSONRenderer()
     else:
-        render_chain = []
+        # Development tracebacks are rendered by ConsoleRenderer itself, after
+        # this; dev carries no production token.
+        render_chain = [scrub_processor]
         renderer = structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
 
     structlog.configure(
@@ -129,6 +155,11 @@ def configure_logging(*, log_level: str = "INFO", json_output: bool = False) -> 
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(log_level)
+    # A line per request is noise at a poll every few seconds, and the line is
+    # the URL. Scrubbing covers DEBUG; this keeps INFO readable.
+    quiet = max(logging.WARNING, logging.getLevelNamesMapping().get(log_level.upper(), 0))
+    for name in _REQUEST_LOGGERS:
+        logging.getLogger(name).setLevel(quiet)
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:

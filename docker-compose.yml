@@ -1,8 +1,7 @@
 # KruAI local development infrastructure.
 #
-# Scope: PostgreSQL 16 + Redis 7 only. The backend itself runs on the host via
-# `make run` during M1/M2 — containerising the app belongs to the deployment
-# task, not here.
+# Scope: PostgreSQL 16 + Redis 7 only. The backend runs on the host via
+# `make run`. The production stack is deploy/compose.yml (D-144).
 #
 # Credentials below are provisioning inputs for the containers, deliberately
 # NOT part of `core/config.py` Settings (which uses extra="forbid"). See
@@ -26,7 +25,8 @@ services:
       TZ: UTC
       PGTZ: UTC
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only (L-4): reachable from this machine, not from the network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -43,7 +43,8 @@ services:
     # appendonly keeps RQ jobs across a dev restart.
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # Loopback only (L-4). Redis has no password; the network must not reach it.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:

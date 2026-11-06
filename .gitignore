@@ -53,3 +53,12 @@ m0/tts-blind.zip
 # M0-1 recordings of real people. Personal data: never committed.
 m0/recordings/
 locales/*.confirm.csv
+
+# Deployment: the server's settings and secrets, and the pack data copied to it.
+deploy/kruai.env
+deploy/postgres.env
+deploy/data/
+
+# Published lesson audio: what import_pack.py writes for the media server.
+# Regenerable from a pack; committed by mistake once (#56), removed with D-144.
+pipeline/packs/published/
